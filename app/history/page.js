@@ -1,7 +1,8 @@
-export default function Home() {
-    return(
-        <div>
-            <h1>hello world</h1>
-        </div>
-    )
+export default function History() {
+
+return (
+    <div>
+        <h1>History here.</h1>
+    </div>
+);
 }
