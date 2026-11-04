@@ -1,6 +1,6 @@
 # PROGRESS.md: Clockback
 
-**Current stage:** Today page at `/` has two reusable buttons. Tapping one logs its action, disables it until refresh, and sends a POST to `/api/sleep`, which replies "Connected". A local Postgres 18 database runs in Docker with two tables and three migrations applied and verified by hand in `psql`. Nothing is saved from the app yet. No login, and Next.js is not connected to the database.
+**Current stage:** Today page at `/` has two reusable buttons. Tapping one logs its action, disables it until refresh, and sends a POST to `/api/sleep`, which replies "Connected". A local Postgres 18 database runs in Docker with two tables and three migrations applied and verified in `psql`. Next.js is now connected to the database through `pg`: `GET /api/sleep` reads `testuser` and returns it as JSON. Nothing is saved from the app yet. No login.
 
 **What it is:** a phone-first web app that helps move a drifting bedtime earlier in small steps. Stack: Next.js (App Router), React, Tailwind, PostgreSQL, in plain JavaScript.
 
@@ -22,6 +22,9 @@
 - If "I'm awake" is tapped and no night is waiting for a wake time, the server creates a row with only a wake time, dated to the night that just ended.
 - Constraint names to map to friendly messages later: `users_username_key`, `users_email_key`, `sleep_logs_user_id_night_date_key`, `sleep_logs_user_id_fkey`, `sleep_logs_bedtime_source_check`, `sleep_logs_wake_time_source_check`.
 - Visual polish (design skill) waits until more of the skeleton exists.
+- `pg` is installed. One shared `Pool` is created in `lib/db.js` and imported by route handlers. `lib/db.js` is server-only and is never imported from a `"use client"` file.
+- All connection settings come from `.env` via `process.env`: `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`. Port 5432 is still hardcoded and matches the Docker `-p 5432:5432` mapping. Revisit if a hosted database uses a different port or a single connection string.
+- Queries use placeholders (`$1` with a values array). User input is never glued into SQL strings.
 
 **Local database setup (how to get back to it):**
 - Settings live in `.env` (git-ignored by `.env*`): `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`. Format is `NAME=value`, no spaces, no quotes. Never paste the password anywhere.
@@ -30,14 +33,11 @@
 - Run a migration at the normal `$` prompt, not inside `psql`: `docker exec -i clockback psql -U <user> -d <database> < db/00X_name.sql`. Add `-v ON_ERROR_STOP=1` to make failures loud.
 - Multi-line commands pasted into `psql` can lose characters. Put them in a scratch file (kept out of Git) and run them like a migration.
 - Docker permission fix that worked: added my user to the `docker` group, then restarted the laptop.
+- `.env` now also holds `POSTGRES_HOST` (`localhost` locally). Restart the dev server after any `.env` change.
 
 **Current code state:**
-- `app/page.js`: parent `div` (`flex flex-col gap-2 m-6`), `h1` "Today", two `<ActionButton>` tags with `label` + `action` ("sleep", "wake").
-- `components/ActionButton.js`: `"use client"`, `useState` for `hasTapped`, `onClick` runs `setHasTapped(true)`, logs `props.action`, and calls `fetch("/api/sleep", { method: "POST" })`. `disabled={hasTapped}` is on the `<button>`. Both buttons send the same request.
-- `app/api/sleep/route.js`: `export function POST()` returns `Response.json("Connected")`. A temporary `GET` experiment may still be in the file.
-- `db/001`, `db/002`, `db/003`: all applied.
-- `.env` exists locally and is not tracked by Git. A `scratch.sql` file may exist; delete it or add it to `.gitignore`.
-- The local database holds test data: user `testuser` (id 1) and one `sleep_logs` row (user 1, night 2026-11-02, bedtime, source "tapped"). Safe to delete.
+- `lib/db.js`: imports `Pool` from `pg` and creates one pool from `process.env` settings. Exports it as default.
+- `app/api/sleep/route.js`: `POST` still returns "Connected". `GET` is async, queries `username` from `users` where `id = 1`, and returns `result.rows`. This GET is a temporary test with a hardcoded id and no login, so remove or protect it before deploying.
 
 **Done so far:**
 - Next.js project set up. Node v24.22.2.
@@ -47,6 +47,8 @@
 - Docker working, Postgres 18 container running with a volume, `.env` ignored by Git.
 - Wrote and ran three migrations; verified tables and constraints with `\d`.
 - Practiced INSERT, SELECT, and DELETE; triggered the unique, pair-unique, foreign key, and CHECK errors on purpose.
+- Installed `pg`, created `lib/db.js`, connected a route handler to Postgres, and read `testuser` in the browser at `/api/sleep`.
+- Moved the database host into `.env` as `POSTGRES_HOST`; re-tested after a restart and it still works.
 
 **Concepts I can explain:** (my own words)
 - File-based routing; `page.js` in `app/` renders at `/`.
@@ -81,12 +83,20 @@
 - `ALTER TABLE ... ADD CONSTRAINT` for changing a table that already exists.
 - `DELETE` always needs a `WHERE`, or it deletes every row.
 - Hashing passwords, and which method to use (a real security decision, handle at login).
-- What `.env` is for, and why code reads `process.env.NAME`.
 - HMR is a dev-only feature, not part of the app.
 
-**Tests run:** no automated tests. Manual checks I reported: dev server starts, pages auto-update, `/history` renders, `/` shows Today, buttons match, a click logs and disables the button, refresh re-enables it (expected), a tap reaches `/api/sleep` with status 200, `/api/sleep` gave 405 until a `GET` was added, Docker container runs and logs "ready to accept connections", all three migrations applied, `\d users` and `\d sleep_logs` match the designs, valid inserts printed `INSERT 0 1`, and these were refused with the expected constraint names: duplicate username, duplicate email, duplicate (user, night), missing user (id 99), and a bad source label ("taped").
+**Explained this session, not yet said back in my own words (practice later):**
+- Pool vs client; why one shared pool.
+- `result.rows` is always an array (`rows[0]` for one row); `rowCount` matters for INSERT/UPDATE/DELETE.
+- `process.env` is built into Node.js, not part of `pg`. Next.js loads `.env` into it at startup.
+- The code's port must match the left side of Docker's `-p` mapping.
+- Settings that differ per environment or are secret belong in `.env`.
+- Placeholders (`$1`) and SQL injection.
 
-**Open decisions:** login approach, timezone handling, exact `pg` setup (connection settings and where the connection code lives, probably `lib/`), and whether to write migration `004` (the time-and-label pairing rule) now or after the server saves data.
+**Tests run:** no automated tests. Manual checks I reported: dev server starts, pages auto-update, `/history` renders, `/` shows Today, buttons match, a click logs and disables the button, refresh re-enables it (expected), a tap reaches `/api/sleep` with status 200, `/api/sleep` gave 405 until a `GET` was added, Docker container runs and logs "ready to accept connections", all three migrations applied, `\d users` and `\d sleep_logs` match the designs, valid inserts printed `INSERT 0 1`, and these were refused with the expected constraint names: duplicate username, duplicate email, duplicate (user, night), missing user (id 99), and a bad source label ("taped").
+- Manual (reported): `/api/sleep` returns `[{"username":"testuser"}]`. Still works after adding `POSTGRES_HOST` and restarting. A typo, `result.row`, was caught and fixed to `result.rows`. No automated tests.
+
+**Open decisions:** login approach, timezone handling, whether to write migration `004` now or after the server saves data, and how the "sleep" tap identifies the user before login exists (for example, a temporary hardcoded user id 1).
 
 **Parked notes:**
 - Success criteria say usage is counted from "logs and opens", but the data model doesn't record opens.
@@ -98,7 +108,9 @@
 - Both buttons send the same request; they need to use `props.action` to differ.
 - Check `.gitignore` for `!.env.example` before creating `.env.example` (setting names only).
 - Never commit `.env`. Commit `db/003_add_source_checks.sql`.
+- Add `POSTGRES_HOST` to `.env.example` (names only) when it's created.
+- The temporary `GET` in `/api/sleep` exposes data with no authentication. Remove it once real routes exist.
 
 **Blockers:** none.
 
-**Next smallest step:** connect Next.js to the database. Check the current `pg` docs, install it, and put the connection code in `lib/` reading its settings from `.env` through `process.env`. Test it by reading the practice user in a route handler. Migration `004` can come before or after.
+**Next smallest step:** make the "sleep" tap save data. Send `props.action` from `ActionButton` in the request, then have the server INSERT a `sleep_logs` row for user 1 (temporary) with the noon-cutoff `night_date`, a bedtime, and source "tapped". Check the result in `psql`.

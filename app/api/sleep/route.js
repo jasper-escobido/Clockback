@@ -1,3 +1,5 @@
+import pool from "../../../lib/db";
+
 
 export function POST() {
 
@@ -5,8 +7,9 @@ export function POST() {
     
 }
 
-export function GET() {
+export async function GET() {
+    const result = await pool.query("SELECT username FROM users WHERE id = $1", [1]);
 
-    return Response.json("Hello from GET"); 
+    return Response.json(result.rows); 
     
 }
