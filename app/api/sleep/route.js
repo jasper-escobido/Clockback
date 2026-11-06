@@ -19,11 +19,42 @@ export async function POST(request) {
     console.log(nightDate);
 
     if (body.action === "sleep") {
-        const tapTime = new Date();
-       await pool.query(
-        "INSERT INTO sleep_logs (user_id, night_date, bedtime, bedtime_source) VALUES ($1, $2, $3, $4)",
-        [1, nightDate, tapTime, "tapped"]
+        const tapNightTime = new Date();
+        try {
+            await pool.query(
+            "INSERT INTO sleep_logs (user_id, night_date, bedtime, bedtime_source) VALUES ($1, $2, $3, $4)",
+            [1, nightDate, tapNightTime, "tapped"]
+            );
+
+        } catch (error) {
+            if (error.constraint === "sleep_logs_user_id_night_date_key"){
+                 return Response.json({ error: "sleep already logged today" }, { status: 409 });
+            }
+            throw error;
+        }
+    }
+
+    if (body.action === "wake") {
+        const tapWakeTime = new Date();
+        const result = await pool.query (
+            "UPDATE sleep_logs SET wake_time = $1, wake_time_source =  $2 WHERE user_id = $3 AND night_date = $4 AND wake_time IS NULL;", 
+            [tapWakeTime, "tapped", 1, nightDate]
         );
+
+        if (result.rowCount === 0) {
+            try {
+                await pool.query(
+                     "INSERT INTO sleep_logs (user_id, night_date, wake_time, wake_time_source) VALUES ($1, $2, $3, $4)",
+                    [1, nightDate, tapWakeTime, "tapped"]
+                );
+
+            } catch (error) {
+                 if (error.constraint === "sleep_logs_user_id_night_date_key"){
+                 return Response.json({ error: "wake already logged today" }, { status: 409 });
+                }
+                throw error;
+            }
+        }
     }
 
     return Response.json("Connected"); 
