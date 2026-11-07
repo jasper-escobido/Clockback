@@ -1,8 +1,10 @@
 # PROGRESS.md: Clockback
 
-**Current stage:** Today page at `/` has two reusable buttons. Tapping one sends a POST to `/api/sleep` with a JSON body, `{action: "sleep"}` or `{action: "wake"}`. The server validates the action (400 if it is neither) and works out `night_date` with the noon cutoff. "sleep" INSERTs a `sleep_logs` row for temporary user id 1 (bedtime = exact tap moment, source "tapped"). "wake" first tries a guarded UPDATE on that night's row (only if `wake_time IS NULL`). If it matched nothing, it INSERTs a wake-only row. Duplicates for either action return 409 with a message, and any other error is rethrown as a 500. All paths tested by hand. Known gap: "wake" matches by the computed date, not by "the latest night still waiting for a wake time" (see parked notes). No login.
+**Current stage:** Today page at `/` has two reusable buttons. Tapping one sends a POST to `/api/sleep` with a JSON body, `{action: "sleep"}` or `{action: "wake"}`. The server validates the action (400 if it is neither) and works out `night_date` with the noon cutoff. "sleep" INSERTs a `sleep_logs` row for temporary user id 1 (bedtime = exact tap moment, source "tapped"). "wake" looks up the user's newest row, then UPDATEs it by `id` only if its `wake_time IS NULL` and its bedtime is within 48 hours. If nothing was updated (no row found, or a guard refused it), it INSERTs a wake-only row. Duplicates for either action return 409 with a message, and any other error is rethrown as a 500. All paths tested by hand. Known limits are in the parked notes. No login.
 
 **What it is:** a phone-first web app that helps move a drifting bedtime earlier in small steps. Stack: Next.js (App Router), React, Tailwind, PostgreSQL, in plain JavaScript.
+
+**How I'm learning:** Guided Learning level. I'm still building my understanding of how requests travel and of backend work, so explain concepts first, give small generic examples on made-up tables (not my exact answer), and let me write my own code. Don't give full ready-to-paste functions unless I ask. One focused question at a time. Corrections welcome.
 
 **Decisions made:**
 - (all earlier decisions unchanged)
@@ -19,18 +21,22 @@
 - `night_date` is assigned by the server (noon cutoff) and saved once. The database only stores it.
 - A time's source label is empty exactly when its time is empty. The server saves a time and its label together. The database backstop for this pairing is still to be written (migration `004`).
 - "Wake time not before bedtime" is only checked when both times exist. Not yet implemented on the UPDATE path.
-- If "I'm awake" is tapped and no night is waiting for a wake time, the server creates a row with only a wake time, dated to the night that just ended.
+- If "I'm awake" is tapped and no night is waiting for a wake time, the server creates a row with only a wake time, using the computed `nightDate`.
 - Constraint names to map to friendly messages: `users_username_key`, `users_email_key`, `sleep_logs_user_id_night_date_key`, `sleep_logs_user_id_fkey`, `sleep_logs_bedtime_source_check`, `sleep_logs_wake_time_source_check`.
 - Visual polish (design skill) waits until more of the skeleton exists.
 - `pg` is installed. One shared `Pool` is created in `lib/db.js` and imported by route handlers. `lib/db.js` is server-only and is never imported from a `"use client"` file.
 - All connection settings come from `.env` via `process.env`: `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`. Port 5432 is still hardcoded and matches the Docker `-p 5432:5432` mapping. Revisit if a hosted database uses a different port or a single connection string.
-- Queries use placeholders (`$1` with a values array). User input is never glued into SQL strings.
+- Queries use placeholders (`$1` with a values array). User input is never glued into SQL strings. Fixed rules of mine (like `interval '48 hours'`) may stay written in the SQL text.
 - The client sends `JSON.stringify({action: props.action})` with header `Content-Type: application/json`. An object, not a bare string, so the field has a name.
 - The server reads the body with `await request.json()` and validates `body.action` itself (400 if not "sleep" or "wake").
 - `night_date` is built from local date parts (`getFullYear`, `getMonth() + 1`, `getDate()`), not `toISOString()`, which converts to UTC first. The server's local time zone is used for now. Timezone handling stays open.
 - Times saved come from a fresh `new Date()` at the moment of the tap (`tapNightTime`, `tapWakeTime`), never from the date that was moved back for the noon cutoff. `night_date` labels the night. The time is when it really happened.
 - A duplicate night becomes a 409 by catching `error.constraint === "sleep_logs_user_id_night_date_key"` inside `catch`. Any other error is rethrown with `throw error;` as the last line inside the `catch`, so it still becomes a 500.
-- "wake" does the guarded UPDATE first. `result.rowCount === 0` means "nothing matched", which has two causes: no row exists (the INSERT succeeds), or the row already has a wake time (the INSERT is refused by the unique rule and becomes a 409). The guard (`AND wake_time IS NULL`) stops a second tap from overwriting the real wake time.
+- "wake" flow: (1) SELECT the newest row's `id` for the user (`ORDER BY night_date DESC LIMIT 1`). (2) If one was found, UPDATE it by `id` with guards `wake_time IS NULL` and `bedtime > now() - interval '48 hours'`, and copy `result.rowCount` into a counter (`updatedCount`, declared with `let` outside the `if`). (3) If `updatedCount === 0`, INSERT a wake-only row inside `try`/`catch`. The INSERT is refused by the unique rule (becomes a 409) if a row for that night already exists.
+- The buttons are for "now" only: they work on the newest night. Older nights are not rescued by the buttons.
+- A night whose `wake_time` stays empty is left empty (NULL) in the database forever. The screen decides to show it as "Missed". Nothing is stored as "missed".
+- The 48-hour window is a safety limit on the UPDATE (the newest row must have a recent bedtime). `ORDER BY ... LIMIT 1` can't go inside an UPDATE's WHERE in Postgres, so the SELECT comes first.
+- Planned feature, "late entry" (a second-chance screen): list nights with an empty `wake_time` and let the user enter an assumed wake time. It will use a new route, probably PATCH (separate from `/api/sleep`), and the label `"entered later"`. The server must re-check everything: the row belongs to the user, `wake_time` is still empty, the time is after that row's bedtime, not in the future, and not an absurd sleep length. Leaning toward "fill empty only, never overwrite". It could also fill a missing bedtime on a wake-only row. A cap on how far back it reaches is undecided.
 - `user_id` is hardcoded to `1` (the id of `testuser`) until login exists. When login exists, the server must get the user id from the session and never from the request body.
 
 **Local database setup (how to get back to it):**
@@ -45,7 +51,7 @@
 **Current code state:**
 - `lib/db.js`: imports `Pool` from `pg` and creates one pool from `process.env` settings. Exports it as default.
 - `components/ActionButton.js`: `handleTap` is a named function that sets `hasTapped`, logs `props.action`, and POSTs the JSON body. The button uses `onClick={handleTap}`.
-- `app/api/sleep/route.js`: `POST` is async. It reads the body, validates the action (400), and computes `nightDate`. The "sleep" block INSERTs four columns (`user_id`, `night_date`, `bedtime`, `bedtime_source`) inside `try`/`catch` (409 on a duplicate, rethrow otherwise). The "wake" block runs the guarded UPDATE (`SET wake_time, wake_time_source WHERE user_id AND night_date AND wake_time IS NULL`). If `rowCount` is 0, it INSERTs a wake-only row inside `try`/`catch` (same 409 and rethrow). The messages are "sleep already logged today" and "wake already logged today". It still has temporary `console.log` lines for the body and `nightDate`. `GET` is still the temporary test (hardcoded id 1, no login), so remove or protect it before deploying.
+- `app/api/sleep/route.js`: `POST` is async. It reads the body, validates the action (400), and computes `nightDate`. The "sleep" block INSERTs four columns (`user_id`, `night_date`, `bedtime`, `bedtime_source`) inside `try`/`catch` ("sleep already logged today", 409). The "wake" block declares `let updatedCount = 0`, runs the SELECT for the newest row (`getInfo`), and if `getInfo.rows.length > 0` runs the guarded UPDATE by id and sets `updatedCount = result.rowCount`. If `updatedCount === 0`, it INSERTs a wake-only row inside `try`/`catch` ("wake already logged today", 409). `throw error;` is the last line inside each `catch`. It still has temporary `console.log` lines for the body, `nightDate`, and `getInfo.rows`. `GET` is still the temporary test (hardcoded id 1, no login), so remove or protect it before deploying.
 
 **Done so far:**
 - Next.js project set up. Node v24.22.2.
@@ -63,7 +69,8 @@
 - Built the noon-cutoff `night_date` and tested it with fixed dates.
 - The "sleep" tap saves a row for user 1; verified in `psql`.
 - Handled the duplicate night with `try`/`catch` (409), and fixed a misplaced `throw error;` (it was outside the `catch`).
-- Built the "wake" action: guarded UPDATE, wake-only INSERT as a fallback, and 409 on a duplicate.
+- Built the "wake" action, first matching by the computed date.
+- Restructured "wake": SELECT newest row, UPDATE by id with two guards, counter, and the wake-only INSERT fallback.
 - Wrote and explained back the full "wake" tap path.
 
 **Concepts I can explain:** (my own words)
@@ -90,30 +97,32 @@
 - JavaScript counts months from 0 (November is raw 10), so add 1 before building the date text.
 - `ActionButton.js` runs in the browser. `page.js` and `route.js` run in the Next.js server. `page.js` imports `ActionButton` as a component, and the only link to `route.js` is the URL in `fetch`.
 - The database sends an error to my server. If the code doesn't catch it, Next.js answers with a 500. `try`/`catch` lets the server reply with a clearer 409.
-- In "wake", `rowCount === 0` means the UPDATE matched nothing, and that has two causes: no row exists, or the row already has a wake time.
 - Before the `if` blocks, the server reads the body with `request.json()`, validates the action (400), and computes `nightDate`, which both buttons use.
+- A later "sleep" tap collides with a wake-only row of the same `night_date` and gets a 409, because the pair is already taken.
 
 **Concepts still to learn (with a reminder to reread):**
 - The `onClick` arrow function shape (practice writing it again).
 - Padding (inside the box) vs margin (outside the box) in one line.
 - Flex only arranges direct children of the flex container.
 - Authentication vs authorization (and why `user_id` must come from the session, not the request).
-- Why the database stores empty (NULL), not the word "missed". The screen decides the wording.
+- Why the database stores empty (NULL), not the word "missed". The screen decides the wording. (Used in the "Missed" decision, but not yet restated in my own words.)
 - Primary key vs unique constraint, in my own words.
 - CRUD, and how INSERT/SELECT/UPDATE/DELETE map to POST/GET/PUT or PATCH/DELETE.
-- SQL shapes: INSERT has a column list, then `VALUES`, one `;` at the very end, and the columns, placeholders and values must line up one to one. UPDATE has `SET` (comma between items), then `WHERE`. In CHECK and in `WHERE`, `IS NULL` needs a column in front, and equality is a single `=`.
+- SQL shapes: INSERT has a column list, then `VALUES`, one `;` at the very end, and the columns, placeholders and values must line up one to one. UPDATE has `SET` (comma between items), then `WHERE`. In CHECK and in `WHERE`, `IS NULL` needs a column in front, and equality is a single `=`. `ORDER BY ... DESC LIMIT 1` gives the newest row.
 - `ALTER TABLE ... ADD CONSTRAINT` for changing a table that already exists.
 - `DELETE` and `UPDATE` always need a `WHERE`, or they hit every row.
-- `UPDATE n` means n rows matched, not that n values changed (running it twice overwrote the wake time until the `IS NULL` guard was added).
+- `UPDATE n` means n rows matched, not that n values changed (running it twice overwrote the wake time until the `IS NULL` guard was added). `UPDATE 0` doesn't say which guard refused: reason from the row's data.
 - Hashing passwords, and which method to use (a real security decision, handle at login).
 - HMR is a dev-only feature, not part of the app.
 - Status code families: 400 bad request, 409 conflict, 500 server error.
-- Mix-ups to revisit: `getDay()` (day of the week) vs `getDate()` (day of the month); `{nightDate}` (a new object) vs `nightDate` (the value); a demo value left in real code; a closing brace or `throw error;` in the wrong block.
-- Test the success path too: the duplicate test alone couldn't reveal a misplaced `throw error;`.
+- Variable scope: `const`/`let` inside curly braces only exists inside them. Declare the container (the counter) outside with `let`, and assign inside with no `let`. I spotted the scope problem myself, but my first fix stored a number instead of the result.
+- Mix-ups to revisit: `getDay()` (day of the week) vs `getDate()` (day of the month); `{nightDate}` (a new object) vs `nightDate` (the value); a demo value left in real code (`returned_at`, `id = 1`); a closing brace or `throw error;` in the wrong block; `updatedCount.rowCount` vs `updatedCount`; a line that copies the result into the counter being forgotten.
+- Test the success path too: a duplicate test alone couldn't reveal a misplaced `throw error;` or a counter that was never filled.
 
 **Explained this session, not yet said back in my own words (practice later):**
 - Pool vs client; why one shared pool.
-- `result.rows` is always an array (`rows[0]` for one row); `rowCount` matters for INSERT/UPDATE/DELETE.
+- `result.rows` is always an array (`rows[0]` for one row, and `[]` when nothing matches, so check `rows.length` before reading `rows[0]`); `rowCount` matters for INSERT/UPDATE/DELETE.
+- `bigint` values come back from `pg` as text (`'15'`, not `15`). Fine to pass back into a placeholder, but don't do math on them.
 - `process.env` is built into Node.js, not part of `pg`. Next.js loads `.env` into it at startup.
 - The code's port must match the left side of Docker's `-p` mapping.
 - Settings that differ per environment or are secret belong in `.env`.
@@ -127,33 +136,39 @@
 - The time saved uses a fresh `new Date()` because the moved date stands for the night, not the tap.
 - The unique rule (migration `002`) is what stops a duplicate. `try`/`catch` only decides the reply. Postgres checks the new pair against an index and refuses with error code `23505` and the constraint's name.
 - `user_id` is `1` because `testuser` has id 1. An id is assigned once when the user row is created, and tapping never changes it.
+- The `[99]` test: without the `rows.length` check it would crash (500). With it, the fallback INSERT hits today's row for user 1 (the INSERT still uses user 1), so the result is a 409. The terminal shows `[]`.
+- Why the restructure works: a wake tap now finds the newest row instead of guessing a date, and old forgotten nights stay untouched ("Missed") instead of being filled by a wake tap days later.
 
 **Tests run:** no automated tests.
 - Manual checks I reported (earlier): dev server starts, pages auto-update, `/history` renders, `/` shows Today, buttons match, a click logs and disables the button, refresh re-enables it (expected), a tap reaches `/api/sleep` with status 200, `/api/sleep` gave 405 until a `GET` was added, Docker container runs and logs "ready to accept connections", all three migrations applied, `\d users` and `\d sleep_logs` match the designs, valid inserts printed `INSERT 0 1`, and these were refused with the expected constraint names: duplicate username, duplicate email, duplicate (user, night), missing user (id 99), and a bad source label ("taped").
-- Manual (reported): `/api/sleep` returns `[{"username":"testuser"}]`, and still works after adding `POSTHOST` and restarting. A typo, `result.row`, was caught and fixed to `result.rows`.
+- Manual (reported): `/api/sleep` returns `[{"username":"testuser"}]`, and still works after adding `POSTGRES_HOST` and restarting. A typo, `result.row`, was caught and fixed to `result.rows`.
 - Manual (reported): `Content-Type` was `text/plain;charset=UTF-8` with the `header` typo and `application/json` after the fix. A `banana` action got 400 and `sleep` got 200. `nightDate` printed `2026-11-05` for a 6:39 pm tap, `2026-11-04` for 3:00 am Nov 5, `2026-11-05` for 12:09 pm Nov 5, and `2026-10-31` for 3:00 am Nov 1.
 - Manual (reported): "sleep" saved a row (user 1, real bedtime, `tapped`). A second tap gave 409 with no new row (it gave 500 before `try`/`catch`). A misspelled column name gave 500 with a red terminal error (rethrow works). After deleting the old row, a fresh "sleep" tap gave 200 and a new row (success path).
-- Manual (reported): "wake" with an existing row for that night updated it (200, no new row). A second "wake" tap gave 409 and left `wake_time` unchanged. A wake tap when no row matched the computed date created a wake-only row (200, bedtime empty, `wake_time_source` `tapped`).
-- In `psql`, the unguarded UPDATE printed `UPDATE 1` twice and overwrote the wake time. With `AND wake_time IS NULL`, it printed `UPDATE 0` and the row was unchanged.
-- Not yet run: a request with no `action` (`{}`), and a 1 January year-boundary result through the app.
+- Manual (reported, earlier "wake" version): "wake" with an existing row for that night updated it (200, no new row). A second "wake" tap gave 409 and left `wake_time` unchanged. A wake tap after noon missed the bedtime row (computed date was the next day) and created a wake-only row.
+- In `psql`: the unguarded UPDATE printed `UPDATE 1` twice and overwrote the wake time. With `AND wake_time IS NULL`, it printed `UPDATE 0` and the row was unchanged. The "find the newest row" SELECT returned the expected ids. An UPDATE by id on row 12 printed `UPDATE 0` (wake time already filled), and on row 10 with `interval '1 hour'` printed `UPDATE 0` (bedtime too old).
+- Manual (reported, restructured "wake" before the counter was added): sleep then wake gave 200 on the same row (id 18), and a second wake gave 409.
+- Manual (reported, final code with the counter): "wake" with the newest row already filled and a recent bedtime created a wake-only row (the `wake_time IS NULL` guard refused the UPDATE, not the bedtime guard). A "sleep" tap after that wake-only row gave 409 (same `night_date`, expected for now). With the lookup changed to `[99]`, the terminal printed `[]` and the result was a 409. The lookup was changed back to `[1]`.
+- Not yet re-checked on the final code: sleep then wake (expect 200, same row, no new row), then wake again (expect 409), and the bedtime guard on an older empty-wake row (a night more than 48 hours old should be left alone). Also not yet run: a request with no `action` (`{}`), and a 1 January year-boundary result through the app.
 
-**Open decisions:** login approach, timezone handling, how "awake" finds the night waiting for a wake time (and how old a waiting night may be), whether to write migration `004` now, and how the taps identify the user before login exists (for now a hardcoded user id 1).
+**Open decisions:** login approach, timezone handling, whether to write migration `004` now, how the taps identify the user before login exists (for now a hardcoded user id 1), and the late-entry details (overwrite or fill-empty only, how far back it may reach, where the screen lives, and whether it can fill a missing bedtime).
 
 **Parked notes:**
-- "wake" matches by the computed date, not "the latest night with no wake time". Cases: a wake tap after noon gets today's date and misses the bedtime row (a separate wake-only row was created); a night several days old never gets its wake time; a later "sleep" tap on a night that already has a wake-only row is refused with 409. A possible fix is to find the latest row for the user with an empty wake time (SELECT first, or ORDER BY ... LIMIT 1 in the UPDATE's WHERE).
+- A "sleep" tap after a wake-only row for the same `night_date` is refused with 409. This happens when "awake" is tapped after noon without a bedtime (the wake-only row gets today's date). Late entry (with the `"entered later"` label) could fix it. Alternatively "sleep" could also try an UPDATE first.
+- The wake-only fallback uses the computed `nightDate`, so a wake tap after noon creates a row dated today, not "the night that just ended".
 - The UPDATE path doesn't check that the wake time is later than the bedtime.
+- A wake-only row has no bedtime, so the bedtime guard (`bedtime > ...`) skips it (a NULL bedtime never satisfies it). That's fine today because such a row already has a wake time.
+- Rows 4 and 10 are old practice rows with empty wake times and are now beyond the 48-hour window. They stay as they are and would show as "Missed".
 - Success criteria say usage is counted from "logs and opens", but the data model doesn't record opens.
 - The night assignment backup rule's wording ("a night already has no wake time") is ambiguous and should be reworded.
 - Nothing in the database yet enforces "a time and its label are both filled or both empty." Planned as migration `004`. Valid cases: both filled, or both empty. A time with no label, or a label with no time, is invalid.
 - `docs/Clockback_spec.md` may be older than the newer spec upload.
-- `app/layout.js` and `app/history/page.js` are still placeholders.
+- `app/layout.js` and `app/history/page.js` are still placeholders (`history` is a likely home for the late-entry screen).
 - The `console.log` lines in `POST` are temporary.
 - The 409 messages are written from the server's view and may be reworded when the screen shows them.
-- Old practice rows (for example id 4) are still in `sleep_logs`.
 - Check `.gitignore` for `!.env.example` before creating `.env.example` (setting names only). Add `POSTGRES_HOST` to it when it's created.
 - Never commit `.env`. Commit `db/003_add_source_checks.sql`.
 - The temporary `GET` in `/api/sleep` exposes data with no authentication. Remove it once real routes exist.
 
 **Blockers:** none.
 
-**Next smallest step:** fix how "awake" finds its night. Decide the rule first (latest row for the user with an empty wake time, and how old it may be). Then practice the matching SELECT or UPDATE in `psql` before changing `route.js`. Re-run the three wake paths afterward: update, duplicate (409), and no row.
+**Next smallest step:** (1) Re-check the final "wake" code quickly: tap "sleep", then "awake" (expect 200 and the same row filled), then "awake" again (expect 409). Report the statuses and a `SELECT * FROM sleep_logs;`. (2) Then plan the late-entry feature using the `project-planning` approach (planning only, no code): what the screen shows, what the new route receives, the server checks, and the open decisions above. Smaller options if I'd rather wait on that: remove the temporary `console.log` lines, add the "wake not before bedtime" check on the UPDATE path, or decide whether to write migration `004`.

@@ -36,12 +36,25 @@ export async function POST(request) {
 
     if (body.action === "wake") {
         const tapWakeTime = new Date();
-        const result = await pool.query (
-            "UPDATE sleep_logs SET wake_time = $1, wake_time_source =  $2 WHERE user_id = $3 AND night_date = $4 AND wake_time IS NULL;", 
-            [tapWakeTime, "tapped", 1, nightDate]
+        let updatedCount = 0;
+
+        const getInfo = await pool.query (
+            "SELECT id FROM sleep_logs WHERE user_id = $1 ORDER BY night_date DESC LIMIT 1;", [99]
         );
 
-        if (result.rowCount === 0) {
+        console.log(getInfo.rows);
+
+        if (getInfo.rows.length > 0) {
+
+            const result = await pool.query (
+            "UPDATE sleep_logs SET wake_time = $1, wake_time_source =  $2 WHERE id = $3 AND wake_time IS NULL AND bedtime > now() - interval '48 hours';", 
+            [tapWakeTime, "tapped", getInfo.rows[0].id]
+            );
+
+            updatedCount = result.rowCount;
+        }
+ 
+        if (updatedCount === 0) {
             try {
                 await pool.query(
                      "INSERT INTO sleep_logs (user_id, night_date, wake_time, wake_time_source) VALUES ($1, $2, $3, $4)",
