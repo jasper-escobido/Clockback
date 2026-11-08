@@ -3,7 +3,6 @@ import pool from "../../../lib/db";
 
 export async function POST(request) {
     const body = await request.json();
-    console.log(body);
 
     if (body.action !== "sleep" && body.action !== "wake") {
     return Response.json({ error: "bad action" }, { status: 400 });
@@ -16,7 +15,6 @@ export async function POST(request) {
     const months = String(date.getMonth() + 1).padStart(2, "0");
     const days = String(date.getDate()).padStart(2, "0");
     const nightDate = years + "-" + months + "-" + days;
-    console.log(nightDate);
 
     if (body.action === "sleep") {
         const tapNightTime = new Date();
@@ -39,15 +37,14 @@ export async function POST(request) {
         let updatedCount = 0;
 
         const getInfo = await pool.query (
-            "SELECT id FROM sleep_logs WHERE user_id = $1 ORDER BY night_date DESC LIMIT 1;", [99]
+            "SELECT id FROM sleep_logs WHERE user_id = $1 ORDER BY night_date DESC LIMIT 1;", [1]
         );
 
-        console.log(getInfo.rows);
 
         if (getInfo.rows.length > 0) {
 
             const result = await pool.query (
-            "UPDATE sleep_logs SET wake_time = $1, wake_time_source =  $2 WHERE id = $3 AND wake_time IS NULL AND bedtime > now() - interval '48 hours';", 
+            "UPDATE sleep_logs SET wake_time = $1, wake_time_source =  $2 WHERE id = $3 AND wake_time IS NULL AND bedtime > now() - interval '48 hours' AND bedtime < $1;", 
             [tapWakeTime, "tapped", getInfo.rows[0].id]
             );
 
