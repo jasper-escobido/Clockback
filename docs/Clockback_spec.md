@@ -28,7 +28,7 @@ My sleep drifted to about 5 am. Every tool I tried depends on me acting at the m
 | "I'm awake" button | One tap saves the wake time on my latest night that has no wake time, regardless of the clock. |
 | Duplicate protection | A second "phone down" tap for the same night is refused. Refreshing the page does not re-enable the button. |
 | Undo | I can remove my most recent tap on tonight's log to fix a mistap. |
-| Fill in yesterday | I can enter a missing time for yesterday only, labeled "entered later". Older days cannot be edited. |
+| Late entry for yesterday | For yesterday's night only (the night before the current night date, using the noon cutoff), I can type clock times to fill a missing wake time, a missing bedtime, or both times for a night with no row, or to replace a time already saved. I type the times in the 12-hour form (hour, minute, am/pm), and the server works out the dates from them. Every time saved this way is labeled "entered later", including replacements (the original tapped value is not kept). A typed sleep can be at most 12 hours, with no minimum. Older nights cannot be edited. The screen says which time is missing, and shows that nothing needs fixing when nothing does. |
 | History view | Each night shows bedtime and wake time. Missing times show as "missed" and are never invented. Entered-later times show a visible label. |
 | Weekly trend | Average bedtime this week compared with last week. Entered-later times are included, with their label shown. |
 | Target bedtime | I set a goal bedtime and step size (for example, 15 minutes earlier) and the app shows the next small step. |
@@ -63,7 +63,7 @@ Decided: plain JavaScript first, with TypeScript later once the fundamentals fee
 | --- | --- | --- | --- |
 | Auth | Email or username, password | A logged-in session, or a refusal | Database |
 | Log tap | Button tap, current time, user | A saved bedtime or wake time, or a refusal | Auth, night-assignment rule, database |
-| Corrections | Undo request, or yesterday's missing time | Updated log, labeled correctly | Auth, rules, database |
+| Corrections | Undo request, or typed clock times for yesterday's night | Updated or new log, labeled correctly | Auth, rules (night resolution, sleep-length limit), database |
 | History and trend | User | Nightly list, weekly averages | Auth, database |
 | Target | Goal bedtime, step size | Saved target, next suggested step | Auth, database |
 
@@ -90,6 +90,17 @@ Decided: plain JavaScript first, with TypeScript later once the fundamentals fee
 
 **Second flow: the morning tap.** Same path, except the server attaches the wake time to my latest night with no wake time, ignoring the clock.
 
+**Third flow: late entry**
+
+1. The screen asks the server what is missing for yesterday's night (a missing wake time, a missing bedtime, or no row at all). The server decides, and the browser only displays.
+2. I type clock times only, in the 12-hour form (hour, minute, am/pm). The server converts them to the 24-hour clock first: 12 am is 0, 12 pm is 12, and any other pm hour adds 12.
+3. The server confirms who I am and that the night is yesterday's.
+4. The server turns the clock times into real moments with one idea used twice: "the first moment with this clock reading after a starting point". The bedtime is the first moment at or after noon on the night's date with the typed reading (so night D covers noon on D to noon on D+1). The wake time is the first moment after the bedtime with the typed reading, which keeps 1 pm wake-ups working. A wake typed with the same reading as the bedtime lands 24 hours later and is refused by the 12-hour cap.
+5. It checks the rules in section 8, then saves the times with the label "entered later" (creating the row if the night has none).
+6. It responds, and the screen shows the night as fixed.
+
+"Yesterday" means the night before the current night date, not the calendar day before today. At 3 am the current night still belongs to the previous calendar day.
+
 **Night assignment rule:** a fixed noon cutoff. A "phone down" tap before noon belongs to the previous night, and a tap after noon belongs to tonight. This holds for my usual latest bedtime of about 5:20 am and for 1 pm wake-ups. The assigned night is saved on the log when it is created, so later changes never re-sort past data. Backup: if a night already has no wake time and I tap "phone down" again, the app asks whether I meant a new night instead of guessing.
 
 ## 8. Data model, validation, and security
@@ -107,7 +118,10 @@ Decided: plain JavaScript first, with TypeScript later once the fundamentals fee
 - Only the owner can create, read, or change a log (authorization).
 - One log per user per night.
 - Times must be real times, and wake time cannot be before bedtime.
-- Corrections are allowed only for tonight (undo) and yesterday (fill in).
+- Corrections are allowed only for tonight (undo) and yesterday's night (late entry).
+- Typed times: nothing in the future, and the wake time must be after the bedtime (when only one time is changed, it is checked against the one already saved).
+- Typed times must be valid: hour 1 to 12, minute 0 to 59, and am or pm. Anything else is refused.
+- Typed times: a sleep longer than 12 hours is refused as a probable typo. There is no minimum. The cap applies only to typed times, never to taps, and the 12 is kept in one named place in `lib/`.
 - A missing time is stored as empty. The screen decides to show "missed", and the database never stores that word.
 
 **Duplicate protection in three layers:** the button disables itself (convenience only), the server refuses duplicates (trusted), and a database rule refuses a second row for the same user and night (last backstop). Only the last two can be trusted, because anyone can send a request without using my button.
@@ -134,8 +148,11 @@ Decided: plain JavaScript first, with TypeScript later once the fundamentals fee
 | 3 | Noon cutoff | 5:20 am tap goes to the previous night, 1 pm tap goes to tonight |
 | 4 | Wake time not before bedtime | Invalid time refused |
 | 5 | Corrections limited | Editing a day older than yesterday refused |
+| 6 | Typed clock times resolve to the right dates | Night Nov 7 with bedtime 5:20 am and wake 1:00 pm gives Nov 8 5:20 am and Nov 8 1:00 pm. Bedtime 11:00 pm and wake 7:00 am gives Nov 7 11:00 pm and Nov 8 7:00 am |
+| 7 | 12-hour cap on typed sleep | A result of 14 hours is refused. A short night (such as 4 hours) is accepted |
+| 8 | 12-hour clock conversion | 12 am gives 0, 12 pm gives 12, 5 am gives 5, 5 pm gives 17 |
 
-**Edge cases:** double-tap, missing wake time, 5:20 am bedtime, 1 pm wake-up, and a first-ever log with no history.
+**Edge cases:** double-tap, missing wake time, 5:20 am bedtime, 1 pm wake-up, a first-ever log with no history, a forgot-both night (no row), replacing a tapped time, a typed wake time that matches the bedtime's clock reading, and a late entry at 3 am (when the current night still belongs to the previous calendar day), and typed times of 12 am and 12 pm.
 
 **Parked for later:** timezones when traveling.
 
@@ -147,7 +164,7 @@ This is a proposal. Exact names can shift with the Next.js version and tools cho
 | --- | --- |
 | `app/` | Pages (login, sign up, today, history, settings) and server routes. In Next.js the folder path becomes the URL. |
 | `components/` | Reusable UI pieces: the two big buttons, history list, trend display. |
-| `lib/` | Logic not tied to a screen: noon cutoff, weekly average, yesterday-only check, database connection. Keeping rules here makes them testable. |
+| `lib/` | Logic not tied to a screen: noon cutoff, weekly average, yesterday-only check, 12-hour to 24-hour conversion, clock-time resolution for late entry, sleep-length limit, database connection. Keeping rules here makes them testable. |
 | `db/` | Table definitions and migrations (saved, ordered changes to the database), optional sample data. |
 | `tests/` | Automated checks for the rules above. |
 | `docs/` | This spec, `PROGRESS.md`, decision notes. |

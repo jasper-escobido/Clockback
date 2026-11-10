@@ -36,7 +36,10 @@
 - The buttons are for "now" only: they work on the newest night. Older nights are not rescued by the buttons.
 - A night whose `wake_time` stays empty is left empty (NULL) in the database forever. The screen decides to show it as "Missed". Nothing is stored as "missed".
 - The 48-hour window is a safety limit on the UPDATE (the newest row must have a recent bedtime). `ORDER BY ... LIMIT 1` can't go inside an UPDATE's WHERE in Postgres, so the SELECT comes first.
-- Planned feature, "late entry" (a second-chance screen): list nights with an empty `wake_time` and let the user enter an assumed wake time. It will use a new route, probably PATCH (separate from `/api/sleep`), and the label `"entered later"`. The server must re-check everything: the row belongs to the user, `wake_time` is still empty, the time is after that row's bedtime, not in the future, and not an absurd sleep length. Leaning toward "fill empty only, never overwrite". It could also fill a missing bedtime on a wake-only row. A cap on how far back it reaches is undecided.
+- Late entry (decided in planning on 2026-11-10, not built; spec updated to match): a second-chance screen for **yesterday's night only**, meaning the night before the current `night_date` (noon cutoff), not the calendar day before today. It covers four situations: a missing wake time, a missing bedtime, no row at all (forgot both), and replacing a time already saved. The user types **clock times only**, in the 12-hour form (hour, minute, am/pm). The server resolves the dates with the noon window (night D runs from noon on D to noon on D+1): a bedtime from 12:00 to 23:59 is on D, a bedtime from 00:00 to 11:59 is on D+1, and a wake time is the first time that clock reading happens after the bedtime (so 1 pm wake-ups still work). The same rule as a method, used in the code: find the bedtime as the first moment at or after noon on `night_date` with the typed reading, then find the wake as the first moment strictly after the bedtime with the typed reading. A wake typed with the same reading as the bedtime lands 24 hours later and is refused by the cap. Every time saved this way is labeled `"entered later"`, including replacements (the original tapped value is not kept). Server checks: the row belongs to the user, the night is yesterday's, the times are real, nothing is in the future, the wake is after the bedtime (checked against the saved time when only one is changed), and a typed sleep is at most 12 hours with no minimum. The cap applies to typed times only, never to taps, and the number lives in one named place in `lib/`. It needs a new route separate from `/api/sleep` (method undecided, since forgot-both creates a row and the others change one). The replace path does not use the `wake_time IS NULL` guard. Its guards are ownership and "yesterday's night".
+- The user types times on a 12-hour clock (hour, minute, am/pm). The server converts them to the 24-hour clock before resolving, so the resolver never deals with am/pm. 12 am becomes 0, 12 pm stays 12, any other am hour stays the same, and any other pm hour adds 12.
+- The clock-time resolver is built in three pieces, in order: (1) 12-hour to 24-hour conversion, (2) "first moment after a starting point with this clock reading", (3) the length check (wake minus bedtime, refuse if over 12 hours). Written as plain functions in `lib/nightTimes.js`, tried with `node` before any route uses them.
+- The conversion function assumes the hour is 1 to 12. Checking that the hour is 1 to 12, the minute is 0 to 59, and the period is "am" or "pm" is the caller's job (the route, later).
 - `LEARNING_NOTES.md` (drafted by AI, saved by me) holds reusable technical knowledge. `PROGRESS.md` stays for project state only.
 - `user_id` is hardcoded to `1` (the id of `testuser`) until login exists. When login exists, the server must get the user id from the session and never from the request body.
 
@@ -53,6 +56,7 @@
 - `lib/db.js`: imports `Pool` from `pg` and creates one pool from `process.env` settings. Exports it as default.
 - `components/ActionButton.js`: `handleTap` is a named function that sets `hasTapped`, logs `props.action`, and POSTs the JSON body. The button uses `onClick={handleTap}`.
 - `app/api/sleep/route.js`: `POST` is async. It reads the body, validates the action (400), and computes `nightDate`. The "sleep" block INSERTs four columns (`user_id`, `night_date`, `bedtime`, `bedtime_source`) inside `try`/`catch` ("sleep already logged today", 409). The "wake" block declares `let updatedCount = 0`, runs the SELECT for the newest row (`getInfo`), and if `getInfo.rows.length > 0` runs the guarded UPDATE by id (three guards: `wake_time IS NULL`, bedtime within 48 hours, bedtime before the new wake time `$1`) and sets `updatedCount = result.rowCount`. If `updatedCount === 0`, it INSERTs a wake-only row inside `try`/`catch` ("wake already logged today", 409). `throw error;` is the last line inside each `catch`. The temporary `console.log` lines were removed (reported). `GET` is still the temporary test (hardcoded id 1, no login), so remove or protect it before deploying.
+- `lib/nightTimes.js` (not used by any route yet): the 12-hour to 24-hour conversion function (renamed to `to24Hour` per my message), taking `hour` and `period`. Order of checks: 12 pm returns 12, 12 am returns 0, any other pm returns `hour + 12`, and anything else returns `hour`. It has temporary `console.log` test calls at the bottom that I run with `node`.
 
 **Done so far:**
 - Next.js project set up. Node v24.22.2.
@@ -79,6 +83,10 @@
 - Tested the 48-hour guard on a row with an empty wake time and a bedtime moved back 3 days: refused silently, then 409 from the fallback INSERT, `wake_time` stayed empty (2026-11-08).
 - Removed the three temporary `console.log` lines from `POST` (2026-11-08).
 - Added the `bedtime < $1` guard to the wake UPDATE and re-ran sleep then awake: 200 and 200, registered in the table (2026-11-08).
+- Planned the late-entry feature step by step (2026-11-10): scope, clock-time-only entry, the noon-window rule, replace-allowed, `"entered later"` on every typed time, 12-hour cap. Updated the spec to match.
+- Decided the 12-hour clock for typing, with conversion to 24-hour inside (2026-11-10). Worked six resolver examples by hand and learned the walk-forward method (start from noon for the bedtime, then from the bedtime for the wake).
+- Wrote piece 1 of the resolver in `lib/nightTimes.js`: a function with two inputs, an `if` for the pm rule, and the two 12 exceptions checked before the general rule (2026-11-10).
+- Ran the file with `node`: the 5 pm call printed 17 (reported).
 
 **Concepts I can explain:** (my own words)
 - File-based routing; `page.js` in `app/` renders at `/`.
@@ -108,6 +116,8 @@
 - A later "sleep" tap collides with a wake-only row of the same `night_date` and gets a 409, because the pair is already taken.
 - What the first two wake UPDATE guards do: `IS NULL` stops a second tap from overwriting the wake time, and the bedtime guard refuses a row whose bedtime is older than 48 hours.
 - A misspelled column name makes the database refuse the query, so it is a thrown error and the user sees a 500.
+- Why the specific checks (12 am, 12 pm) go before the general pm rule: `return` ends the function, so a general rule placed first would catch the 12 before the exception ran.
+- Why `hour === 12` is safer than `hour > 11`: a bad hour like 13 falls through to an obviously wrong answer instead of being quietly treated as 12.
 
 **Concepts still to learn (with a reminder to reread):**
 - The `onClick` arrow function shape (practice writing it again).
@@ -128,6 +138,7 @@
 - Mix-ups to revisit: `getDay()` (day of the week) vs `getDate()` (day of the month); `{nightDate}` (a new object) vs `nightDate` (the value); a demo value left in real code (`returned_at`, `id = 1`); a closing brace or `throw error;` in the wrong block; `updatedCount.rowCount` vs `updatedCount`; a line that copies the result into the counter being forgotten.
 - Test the success path too: a duplicate test alone couldn't reveal a misplaced `throw error;` or a counter that was never filled.
 - More mix-ups to revisit: a lookup that finds nothing is not an error (I guessed `[99]` would throw a 500 that the 409 overrides); the bedtime guard reads `bedtime`, not `night_date`; the button label ("awake") vs the action value the server sees ("wake"); `if` decides, `catch` receives the thrown error.
+- Resolver mix-ups to revisit: the date on a timestamp vs the night's label (a 3:00 am bedtime for night Nov 7 is Nov 8 3:00 am, because Nov 7 3:00 am is before the night starts at noon); counting sleep length (12:30 am to 9:00 am is 8 h 30 min, not 9 h 30 min); assuming 12 am is "normal" (it is 0 on the 24-hour clock); `return` followed by a line break returns nothing; a single `=` assigns while `===` compares (`return hour = 12` works by accident); a call with too few arguments leaves the missing one `undefined`; file names are case-sensitive on Linux and in deployment.
 
 **Explained this session, not yet said back in my own words (practice later):**
 - Pool vs client; why one shared pool.
@@ -153,6 +164,11 @@
 - Race condition: two requests that overlap can read before the other has written. The sleep/awake overlap gave a 409 because the lookup found an older row, not because the timestamps matched.
 - A request's status line prints when it finishes, so lines can appear out of order. `console.log(body)` prints the body that arrived, not the response status.
 - `$1` can be used more than once in one query as long as the values array holds one value for it.
+- Noon window for typed times: night D covers noon on D to noon on D+1, so a bedtime on either side of midnight lands on the right date. A wake time is tied to the bedtime (the first matching clock time after it), not to the window, because wake-ups can fall after noon. "Yesterday" means the night before the current `night_date`, not the calendar day before today.
+- `night_date` labels the night and the timestamp is when it really happened, so one night can hold times on two calendar dates. (A normal sleep then awake does not create a new row: awake fills in the existing row. A wake-only row appears only when no row is waiting.)
+- The walk-forward method: both times use one idea, "the first time this clock reading happens after a starting point". The bedtime starts at noon on the night's date, and the wake starts at the bedtime. The user types 12-hour times and the conversion to the 24-hour clock happens before this.
+- Basics of running a function by hand: `function`, parameters, `return`, a call is the name plus `()`, `console.log` prints to the terminal, `node file.js` runs one file from the project root. `export` is only needed when another file imports the function.
+- `&&` means both conditions must be true, and `if` blocks are checked top to bottom.
 
 **Tests run:** no automated tests.
 - Manual checks I reported (earlier): dev server starts, pages auto-update, `/history` renders, `/` shows Today, buttons match, a click logs and disables the button, refresh re-enables it (expected), a tap reaches `/api/sleep` with status 200, `/api/sleep` gave 405 until a `GET` was added, Docker container runs and logs "ready to accept connections", all three migrations applied, `\d users` and `\d sleep_logs` match the designs, valid inserts printed `INSERT 0 1`, and these were refused with the expected constraint names: duplicate username, duplicate email, duplicate (user, night), missing user (id 99), and a bad source label ("taped").
@@ -167,9 +183,11 @@
 - Manual (reported): a `{}` request from the browser console returned 400. The terminal printed `{}` and the 400 status line, no `nightDate` line printed, and no row was added.
 - Manual (reported): after `UPDATE sleep_logs SET wake_time = NULL, wake_time_source = NULL, bedtime = now() - interval '3 days' WHERE id = 28;`, an awake tap gave 409 and `wake_time` stayed empty (the bedtime guard refused the UPDATE, then the fallback INSERT hit the unique rule). My first version of that statement changed `night_date` instead of `bedtime`, which would have tested something else.
 - Manual (reported): after removing the `console.log` lines, sleep then awake gave 200 and 200. After adding `bedtime < $1`, sleep then awake gave 200 and 200 and the table showed the row filled.
+- Worked by hand (no code, reported answers): night Nov 7 with bedtime 3:00 and wake 11:00 (first answer had the bedtime on the wrong date, corrected to Nov 8 3:00 am to Nov 8 11:00 am, 8 hours); 10 pm to 11 am (13 hours, refused by the cap); 12:30 am to 9:00 am (Nov 8, 8 h 30 min); 5:20 am to 1:00 pm (Nov 8, 7 h 40 min, matches the spec).
+- Manual (reported): `convertTime(5, "pm")` printed 17. The four-call run (5 am, 12 am, 12 pm, 5 pm) has not been reported yet. Reading the code, the expected output is 5, 0, 12, 17. Pieces 2 and 3 of the resolver are not written.
 - Not yet seen: the `bedtime < $1` guard actually refusing a request (a tap can't trigger it, so it needs late entry). Not yet run: a 1 January year-boundary result through the app.
 
-**Open decisions:** login approach, timezone handling, whether to write migration `004` now, how the taps identify the user before login exists (for now a hardcoded user id 1), and the late-entry details (overwrite or fill-empty only, how far back it may reach, where the screen lives, and whether it can fill a missing bedtime).
+**Open decisions:** login approach, timezone handling, whether to write migration `004` now, how the taps identify the user before login exists (for now a hardcoded user id 1), and the remaining late-entry details: the route's name and method, where the screen lives (`history` is a likely home), how the screen asks the server what is missing, how the screen collects 12-hour times (hour, minute, am/pm) and checks them before sending, and what to do about an after-noon wake-only row (see parked notes).
 
 **Parked notes:**
 - A "sleep" tap after a wake-only row for the same `night_date` is refused with 409. This happens when "awake" is tapped after noon without a bedtime (the wake-only row gets today's date). Late entry (with the `"entered later"` label) could fix it. Alternatively "sleep" could also try an UPDATE first.
@@ -180,15 +198,16 @@
 - Success criteria say usage is counted from "logs and opens", but the data model doesn't record opens.
 - The night assignment backup rule's wording ("a night already has no wake time") is ambiguous and should be reworded.
 - Nothing in the database yet enforces "a time and its label are both filled or both empty." Planned as migration `004`. Valid cases: both filled, or both empty. A time with no label, or a label with no time, is invalid.
-- `docs/Clockback_spec.md` may be older than the newer spec upload.
+- `docs/Clockback_spec.md` should be replaced with the updated spec (late-entry decisions added). Its status line still says "planned only, nothing is built". Reword it when convenient.
 - `app/layout.js` and `app/history/page.js` are still placeholders (`history` is a likely home for the late-entry screen).
 - The 409 messages are written from the server's view and may be reworded when the screen shows them.
 - Check `.gitignore` for `!.env.example` before creating `.env.example` (setting names only). Add `POSTGRES_HOST` to it when it's created.
 - Never commit `.env`. Commit `db/003_add_source_checks.sql`.
 - The temporary `GET` in `/api/sleep` exposes data with no authentication. Remove it once real routes exist.
 - Two taps sent almost at once (sleep then awake within ~250 ms) can overlap: the awake lookup runs before the sleep INSERT finishes, finds the older row, and gets a 409. Only happens on rapid testing. The unique rule kept the data clean. Revisit only if it happens in real use.
-- Row 28 (2026-11-08) was edited by hand for the 48-hour test (empty wake time, bedtime moved back 3 days). Check whether it is still in the table and delete it if it is a leftover test row (`DELETE ... WHERE id = 28;`, always with the `WHERE`).
+- Row 28 was deleted. The latest row is 32 and is complete (from earlier tests).
+- Interaction to decide: an awake tap after noon with no bedtime creates a wake-only row dated **today**, but the night it belongs to is yesterday's. Late entry for yesterday would then see "no row", and the stray row dated today would stay. Options for later: let late entry notice and fold such a row in, or change how the awake tap picks its night. Not decided.
 
 **Blockers:** none.
 
-**Next smallest step:** (1) Plan the late-entry feature using the `project-planning` approach (planning only, no code): what the screen shows, what the new route receives, the server checks (including the `bedtime < time` rule, which taps can't test), and the open decisions above. Smaller options if I'd rather wait: decide whether to write migration `004` (time and label both filled or both empty, possibly the wake-after-bedtime CHECK), or run the 1 January year-boundary check.
+**Next smallest step:** (1) Run the conversion file with all four calls (5 am, 12 am, 12 pm, 5 pm) and check the output is 5, 0, 12, 17. (2) Piece 2: a function that takes a starting moment and a 24-hour clock reading and returns the first moment after the start with that reading. (3) Piece 3: the length check. Then combine them for one night's bedtime and wake, try the planned examples in `node`, and only then build the read side, the write route, and the screen.
