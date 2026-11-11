@@ -86,7 +86,7 @@
 - Planned the late-entry feature step by step (2026-11-10): scope, clock-time-only entry, the noon-window rule, replace-allowed, `"entered later"` on every typed time, 12-hour cap. Updated the spec to match.
 - Decided the 12-hour clock for typing, with conversion to 24-hour inside (2026-11-10). Worked six resolver examples by hand and learned the walk-forward method (start from noon for the bedtime, then from the bedtime for the wake).
 - Wrote piece 1 of the resolver in `lib/nightTimes.js`: a function with two inputs, an `if` for the pm rule, and the two 12 exceptions checked before the general rule (2026-11-10).
-- Ran the file with `node`: the 5 pm call printed 17 (reported).
+- Ran the file with `node`: all four calls (5 am, 12 am, 12 pm, 5 pm) printed 5, 0, 12, 17 (reported 2026-11-10). Piece 1 of the resolver is done.
 
 **Concepts I can explain:** (my own words)
 - File-based routing; `page.js` in `app/` renders at `/`.
@@ -184,7 +184,7 @@
 - Manual (reported): after `UPDATE sleep_logs SET wake_time = NULL, wake_time_source = NULL, bedtime = now() - interval '3 days' WHERE id = 28;`, an awake tap gave 409 and `wake_time` stayed empty (the bedtime guard refused the UPDATE, then the fallback INSERT hit the unique rule). My first version of that statement changed `night_date` instead of `bedtime`, which would have tested something else.
 - Manual (reported): after removing the `console.log` lines, sleep then awake gave 200 and 200. After adding `bedtime < $1`, sleep then awake gave 200 and 200 and the table showed the row filled.
 - Worked by hand (no code, reported answers): night Nov 7 with bedtime 3:00 and wake 11:00 (first answer had the bedtime on the wrong date, corrected to Nov 8 3:00 am to Nov 8 11:00 am, 8 hours); 10 pm to 11 am (13 hours, refused by the cap); 12:30 am to 9:00 am (Nov 8, 8 h 30 min); 5:20 am to 1:00 pm (Nov 8, 7 h 40 min, matches the spec).
-- Manual (reported): `convertTime(5, "pm")` printed 17. The four-call run (5 am, 12 am, 12 pm, 5 pm) has not been reported yet. Reading the code, the expected output is 5, 0, 12, 17. Pieces 2 and 3 of the resolver are not written.
+- Manual (reported, 2026-11-10): `node lib/nightTimes.js` with four calls printed 5, 0, 12, 17 (5 am, 12 am, 12 pm, 5 pm), matching the expected table. All four paths of the conversion function are checked. Pieces 2 and 3 of the resolver are not written.
 - Not yet seen: the `bedtime < $1` guard actually refusing a request (a tap can't trigger it, so it needs late entry). Not yet run: a 1 January year-boundary result through the app.
 
 **Open decisions:** login approach, timezone handling, whether to write migration `004` now, how the taps identify the user before login exists (for now a hardcoded user id 1), and the remaining late-entry details: the route's name and method, where the screen lives (`history` is a likely home), how the screen asks the server what is missing, how the screen collects 12-hour times (hour, minute, am/pm) and checks them before sending, and what to do about an after-noon wake-only row (see parked notes).
@@ -210,4 +210,4 @@
 
 **Blockers:** none.
 
-**Next smallest step:** (1) Run the conversion file with all four calls (5 am, 12 am, 12 pm, 5 pm) and check the output is 5, 0, 12, 17. (2) Piece 2: a function that takes a starting moment and a 24-hour clock reading and returns the first moment after the start with that reading. (3) Piece 3: the length check. Then combine them for one night's bedtime and wake, try the planned examples in `node`, and only then build the read side, the write route, and the screen.
+**Next smallest step:** (1) Piece 2: a function that takes a starting moment and a 24-hour clock reading and returns the first moment after the start with that reading. (2) Piece 3: the length check. Then combine them for one night's bedtime and wake, try the planned examples in `node`, and only then build the read side, the write route, and the screen.

@@ -130,3 +130,142 @@ The two sides share no variables. Only the request out and the response back cro
 **Current ability:** understanding. I wrote the corrected setup statement myself after the first version was caught.
 
 **Open item:** the guard `bedtime < $1` can't be failed by a tap, so it needs a late-entry request to be seen refusing something.
+
+---
+
+## 7. Functions: inputs, `return`, calling, and running one file
+
+**Purpose:** package one small job so I can reuse it and test it alone.
+
+**Mental model:** a function is a small machine. Values go in (parameters), one value comes out (`return`). Nothing happens until it is called.
+
+**Reusable structure (made-up `lib/cups.js`):**
+
+```js
+function cupsToMillilitres(cups) {
+  return cups * 240;
+}
+
+console.log(cupsToMillilitres(1));
+console.log(cupsToMillilitres(2));
+```
+
+- The parameter (`cups`) is a name for whatever value is passed in.
+- A call is the function's name plus `()` with the values inside.
+- `return` sends the answer back and **ends the function right there**.
+- `console.log` only prints to the terminal. It has nothing to do with `export`. `export` is needed only when another file imports the function.
+- `node lib/cups.js`, run from the project root, runs that one file and prints its output. It is a quick test and not the dev server.
+- Names that say what they mean (`hour`, `period`) beat `a` and `b` as soon as the function has real logic.
+
+**Common mistakes:**
+- `return` followed by a line break returns nothing (`undefined`). Keep the value on the same line.
+- Calling with too few values (`f(1)` for two parameters) leaves the missing one `undefined`.
+- After renaming a parameter, an old name left inside the function stops working.
+- File names are case-sensitive on Linux and in deployment (`nightTimes.js` and `nightTImes.js` are different files).
+
+**Current ability:** understanding. I wrote a working two-input function and ran it with `node` myself.
+
+**Next practice (optional):** write a small function from scratch (inputs on paper first), then call it three times with different values.
+
+---
+
+## 8. Conditionals: `if`, `===`, `&&`, and order
+
+**Purpose:** make code choose between cases, and make the choice correct.
+
+**Reusable structure (made-up parcel fee):**
+
+```js
+function parcelFee(weight, speed) {
+  if (speed === "express" && weight > 10) {
+    return 50;
+  }
+  if (speed === "express") {
+    return 30;
+  }
+  return 10;
+}
+```
+
+- Checks run top to bottom. Because `return` ends the function, **the most specific rule goes first and the general rule after it**.
+- `&&` means both sides must be true.
+- `===` compares. A single `=` assigns, so `if (x = 12)` would store 12 and still count as true, a bug that throws no error.
+- Text values go in quotes (`"pm"`).
+- The last line is the fall-through: everything no `if` caught.
+- Prefer the exact check (`hour === 12`) over a loose one (`hour > 11`). A loose check treats bad input as valid, and an exact check lets bad input fall through to an obviously wrong answer.
+
+**Common mistakes:**
+- An empty `if` block does nothing, and the code falls through to the next rule.
+- Putting the general rule before the exception, so the exception never runs.
+- `return hour = 12`: it works by accident. Write `return 12`.
+
+**Current ability:** understanding, with recall in progress. I wrote the two 12 checks myself and gave the right reason for putting them before the general rule.
+
+**Next practice (optional):** write a three-way rule (for example, a ticket price for children, adults, and seniors) with the most specific check first.
+
+---
+
+## 9. Edge cases and testing every path
+
+**Purpose:** most bugs live at the odd values, not the ordinary ones.
+
+**Pattern:**
+1. Write the expected answers in a small table **before** running.
+2. Include at least one call for every path through the function, including the special cases.
+3. Predict the output, run it, and compare.
+
+**Made-up example:** a function that turns a score into a letter grade. The ordinary rows (85, 70) are easy. The rows that catch bugs are the boundaries (90, 89, 0, 100), because that is where `>` vs `>=` mistakes show up.
+
+**Real example from this project:** converting 12-hour time to 24-hour time looks like "add 12 for pm", but 12 am (0) and 12 pm (12) break the simple rule. A test with only 5 am and 5 pm would have passed and hidden both bugs. Testing all four calls (5 am, 12 am, 12 pm, 5 pm) printed 5, 0, 12, 17, matching the table.
+
+**Common mistakes:**
+- Testing only the cases that already work.
+- Assuming a special case is "normal" (I assumed 12 am stayed 12).
+- Removing an earlier test call so a path is no longer covered.
+
+**Current ability:** understanding. I spotted the 12 pm problem myself but missed 12 am until I wrote out the table.
+
+**Next practice (optional):** for any new function, write the table of expected results first, including the boundary rows, then run it.
+
+---
+
+## 10. Pure functions, and where validation lives
+
+**Purpose:** keep rules separate from the database and the screen so they can be tested alone.
+
+**Mental model:** a pure function takes values and returns a value. It touches no database, no screen, and no clock unless the clock is passed in. That is why the resolver pieces go in `lib/` and are tried with `node`, with no server or database running.
+
+**Where validation lives:**
+- A small function can assume its input is valid (the 12-hour converter assumes the hour is 1 to 12).
+- The code that **receives the user's input** (the route) checks it before calling. This matches the trusted-layer idea in the project: the server checks everything, and the page only helps.
+- If the function never checks, a bad value gives a wrong answer silently, so the caller's check is not optional.
+
+**Common mistakes:**
+- Assuming the function will check input it was never written to check.
+- Mixing database calls into a rule that could be a pure function, which makes it harder to test.
+
+**Current ability:** recognition. This will matter once the route calls the resolver.
+
+---
+
+## 11. Time: labels vs moments, and the 12-hour vs 24-hour clock
+
+**Purpose:** avoid off-by-a-day bugs, which are among the most common in apps that handle time.
+
+**Key ideas:**
+- A label (a date that names a period, like a night) and a timestamp (the exact moment) are different things. One labeled period can hold timestamps on two calendar dates.
+- The user sees the 12-hour clock. The code works internally with the 24-hour clock (0 to 23). The conversion happens once, at the edge. The 12 hour is special in both halves: 12 am is 0 and 12 pm is 12.
+- **Walk-forward method:** "the first moment with this clock reading after a starting point". Used twice, with different starting points, it finds both times.
+
+**Made-up example:** a bakery's business day D runs from 4 pm on D to 4 pm on D+1. A worker types a shift of 9:00 pm to 5:30 am for day D.
+1. The start is the first 9:00 pm at or after 4 pm on D, which is 9:00 pm on D.
+2. The end is the first 5:30 am after that start, which is 5:30 am on D+1.
+3. The length is 8 hours 30 minutes.
+
+**Common mistakes:**
+- Putting a timestamp on the label's date when it belongs to the next day (a 3:00 am bedtime for a night labeled Nov 7 is Nov 8, because Nov 7 at 3:00 am is before that night starts).
+- Counting a duration wrong. Count up to the next whole hour first (12:30 to 1:00 is 30 minutes, then 1:00 to 9:00 is 8 hours, so 8 h 30 min).
+
+**Current ability:** understanding. I worked four examples by hand, including the 5:20 am to 1:00 pm case correctly. Timezones are still to learn.
+
+**Next practice (optional):** make up a new window (for example, a day that starts at 6 am) and resolve two typed times by hand.
