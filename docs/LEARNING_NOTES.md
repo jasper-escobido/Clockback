@@ -269,3 +269,87 @@ function parcelFee(weight, speed) {
 **Current ability:** understanding. I worked four examples by hand, including the 5:20 am to 1:00 pm case correctly. Timezones are still to learn.
 
 **Next practice (optional):** make up a new window (for example, a day that starts at 6 am) and resolve two typed times by hand.
+
+
+---
+
+## 12. Dates in JavaScript: dials, copies, and comparing
+
+**Purpose:** handle moments in time without silent off-by-seconds or off-by-a-day bugs.
+
+**Mental model:** a `Date` is one exact moment. Its time of day sits on four dials: hours, minutes, seconds, milliseconds. A `set...` call turns only the dials it names and leaves the others as they were.
+
+**Reusable structure (made-up job, a day at a given time):**
+
+```js
+function sameDayAt(day, h, m) {
+  const c = new Date(day);       // a copy, so day is not changed
+  c.setHours(h, m, 0, 0);        // all four dials: hours, minutes, seconds, milliseconds
+  return c;
+}
+```
+
+- `setHours(h, m, 0, 0)` sets the whole time of day. Setting only hours and minutes keeps the old seconds, which can leak into the result.
+- `new Date(otherDate)` copies. Changing the copy does not change the original.
+- Months count from 0 (November is 10), so `new Date(2026, 10, 7)` is Nov 7.
+- Compare moments with `<`, `<=`, `>`. Do not use `===` on dates, because two dates for the same moment are different objects.
+- `later - earlier` gives milliseconds. Divide by a named constant to convert (`60 * 60 * 1000` per hour).
+- `.toString()` shows local time. A plain `console.log(date)` shows UTC.
+- The date methods use the computer's local timezone, and a deployed server may differ. This is a decision to make before deploying.
+
+**Common mistakes:**
+- Forgetting the dials you did not set (the seconds from the start leaking into the result).
+- Using `<` where the equal case must also count (`<=`), so an exact match does not move forward.
+- Writing the expected answer on the wrong clock (a reading of 7 on the 24-hour clock is 7 am, not 7 pm).
+- Typing a number with commas in code (`3,600,00`).
+
+**Current ability:** understanding. My own test found the seconds bug, and I explained the `<=` vs `<` difference by running both.
+
+**Next practice (optional):** write a function that returns the first moment after a start with a given hour and minute, from memory, then break it on purpose with a start that has seconds.
+
+---
+
+## 13. Composing functions: inputs, values made inside, and returning an object
+
+**Purpose:** build a bigger rule out of small tested pieces.
+
+**Mental model:** a function's **inputs** come from the caller, in the names on its top line. Everything else is **made inside** by lines in its body, often as the return value of another function. The same value can be made inside one function and be an input to the next.
+
+**Reusable structure (made-up bill):**
+
+```js
+function addTax(price) { return price * 1.1; }
+function addTip(amount, percent) { return amount * (1 + percent / 100); }
+
+function finalBill(price, tipPercent) {   // inputs: price, tipPercent
+  const taxed = addTax(price);            // made inside
+  const total = addTip(taxed, tipPercent); // taxed feeds the next call
+  return total;
+}
+```
+
+- Calling another function by name is not the same as passing it in. The earlier functions are tools that already exist in the file.
+- Keep each step's answer in a named variable so every line does one thing, and check the parameter **order** of each call (mixing it up gives wrong results with no error).
+- A function returns one value, but that value can be an **object** bundling several named values:
+
+```js
+function checkParcel(weight) {
+  if (weight > 20) {
+    return { ok: false, reason: "too_heavy" };
+  }
+  return { ok: true, fee: weight * 2 };
+}
+```
+
+- The caller checks `ok` first, then decides what to do (for example, a route replying 400 with the reason).
+- A refusal rule should say exactly what it refuses (`>` refuses only values over the limit, so the limit itself is allowed).
+- A limit used in several places lives in one named constant, so changing it is a one-line edit.
+
+**Common mistakes:**
+- Thinking earlier functions must be passed in as inputs.
+- Confusing a function's inputs with the values its body creates.
+- Mixing up the order of arguments in a call.
+
+**Current ability:** recognition. I understood the flow but was still sorting out inputs vs values made inside when this was written.
+
+**Next practice (optional):** from a three-step description of a job, list the inputs and the values made inside before writing any code.
