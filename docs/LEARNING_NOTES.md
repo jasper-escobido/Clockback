@@ -218,6 +218,8 @@ function parcelFee(weight, speed) {
 
 **Real example from this project:** converting 12-hour time to 24-hour time looks like "add 12 for pm", but 12 am (0) and 12 pm (12) break the simple rule. A test with only 5 am and 5 pm would have passed and hidden both bugs. Testing all four calls (5 am, 12 am, 12 pm, 5 pm) printed 5, 0, 12, 17, matching the table.
 
+**Second real example:** the resolver's bedtime lookup treated "equal to the window start" like "too early", so a 12:00 pm bedtime landed a day late. The result still said `ok: true`, because the length check only looks at the gap. Only a test at the exact boundary exposed it. The first fix (`<` for both callers) then let a same-time bedtime and wake through as 0 hours, so the second boundary needed its own test.
+
 **Common mistakes:**
 - Testing only the cases that already work.
 - Assuming a special case is "normal" (I assumed 12 am stayed 12).
@@ -349,7 +351,82 @@ function checkParcel(weight) {
 - Thinking earlier functions must be passed in as inputs.
 - Confusing a function's inputs with the values its body creates.
 - Mixing up the order of arguments in a call.
+- Shorthand: `{ ok: true, fee }` is the same as `{ ok: true, fee: fee }`. It works only when the variable is named like the key.
 
-**Current ability:** recognition. I understood the flow but was still sorting out inputs vs values made inside when this was written.
+**Current ability:** understanding. I wrote all five steps of `resolveNight` myself, predicted the dates, and kept inputs and values made inside apart.
 
 **Next practice (optional):** from a three-step description of a job, list the inputs and the values made inside before writing any code.
+
+---
+
+## 14. `return` stops only its own function, and `console.log` gives back nothing
+
+**Purpose:** make sure the caller really receives the value, not just a printed copy.
+
+**Mental model:** `return` hands a value to whoever called that function, and ends that function. `console.log` only writes a message to the terminal and hands back nothing.
+
+**Reusable structure (made-up):**
+
+```js
+function outer() {
+  function inner() {
+    return "inner done";      // ends inner only
+  }
+  inner();
+  return "outer done";        // outer keeps running until its own return
+}
+
+function double(n) {
+  return console.log(n * 2);  // prints, but returns undefined
+}
+const answer = double(5);     // prints 10, answer is undefined
+```
+
+- To see a returned value while testing, wrap the call: `console.log(double(5))`, or store it: `const answer = double(5)`.
+- A temporary print inside an `if`, placed **before** its `return`, shows which branch ran. A line after the `return` in the same block never runs.
+- Reading a key from `undefined` (`answer.ok`) throws a TypeError. It usually means a function returned nothing.
+
+**Common mistakes:**
+- `return console.log(...)`: the output looks right, but the caller gets `undefined`.
+- Putting the `if` and its `return` inside an inner helper, so the outer function never stops.
+
+**Current ability:** understanding. Both bugs were pointed out to me, and I fixed them and explained the change.
+
+**Next practice (optional):** write a function with an early `return` inside an `if`, call it twice, and say which later lines ran each time.
+
+---
+
+## 15. A true/false input, and testing the exact boundary
+
+**Purpose:** let one helper serve two callers that differ only in whether an exact match counts.
+
+**Mental model:** a boolean parameter chooses between two comparisons. The two comparisons (`<` vs `<=`, `>` vs `>=`) give different answers only when the two values are exactly equal.
+
+**Reusable structure (made-up checkout deadline):**
+
+```js
+function isLate(deadline, arrival, deadlineCounts) {
+  let late;
+  if (deadlineCounts) {
+    late = arrival > deadline;    // arriving exactly at the deadline is fine
+  } else {
+    late = arrival >= deadline;   // arriving exactly at the deadline is late
+  }
+  return late;
+}
+```
+
+- Write a boolean alone in the condition: `if (deadlineCounts)`, not `=== true`.
+- The name must say what `true` does. Trace the branches to check, don't trust the name.
+- A call that leaves the argument out gets `undefined`, which acts as `false`, so update every caller.
+- Test the exact-equal input with both flag values. Ordinary inputs can't tell the two comparisons apart.
+- Changing a shared helper for one caller can break the other. Decide per caller what the equal case means.
+
+**Common mistakes:**
+- A flag name that says the opposite of its behavior (mine was swapped at first).
+- Adding the input and forgetting to pass it at the calls.
+- Fixing one caller's boundary by changing the shared comparison for both.
+
+**Current ability:** understanding. I ran `<` for both callers myself and saw the 0-hour result, then wrote the flag version.
+
+**Next practice (optional):** write a small function with a boolean input from scratch, then predict four calls, including the exact-equal one, with both flag values.
