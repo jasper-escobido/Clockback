@@ -7,13 +7,13 @@ export async function POST(request) {
     if (body.action !== "sleep" && body.action !== "wake") {
     return Response.json({ error: "bad action" }, { status: 400 });
 }
-    const date = new Date();
-    if (date.getHours() < 12) {
-        date.setDate(date.getDate() - 1);
+    const d = new Date();
+    if (d.getHours() < 12) {
+        d.setDate(d.getDate() - 1);
     }
-    const years = String(date.getFullYear());
-    const months = String(date.getMonth() + 1).padStart(2, "0");
-    const days = String(date.getDate()).padStart(2, "0");
+    const years = String(d.getFullYear());
+    const months = String(d.getMonth() + 1).padStart(2, "0");
+    const days = String(d.getDate()).padStart(2, "0");
     const nightDate = years + "-" + months + "-" + days;
 
     if (body.action === "sleep") {

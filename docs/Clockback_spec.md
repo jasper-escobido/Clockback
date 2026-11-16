@@ -28,7 +28,7 @@ My sleep drifted to about 5 am. Every tool I tried depends on me acting at the m
 | "I'm awake" button | One tap saves the wake time on my latest night that has no wake time, regardless of the clock. |
 | Duplicate protection | A second "phone down" tap for the same night is refused. Refreshing the page does not re-enable the button. |
 | Undo | I can remove my most recent tap on tonight's log to fix a mistap. |
-| Late entry for yesterday | For yesterday's night only (the night before the current night date, using the noon cutoff), I can type clock times to fill a missing wake time, a missing bedtime, or both times for a night with no row, or to replace a time already saved. I type the times in the 12-hour form (hour, minute, am/pm), and the server works out the dates from them. Every time saved this way is labeled "entered later", including replacements (the original tapped value is not kept). A typed sleep can be at most 12 hours, with no minimum. Older nights cannot be edited. The screen says which time is missing, and shows that nothing needs fixing when nothing does. |
+| Late entry for yesterday | For yesterday's night only (the night dated one calendar day before today's date; the noon cutoff does not decide this), I can type clock times to fill a missing wake time, a missing bedtime, or both times for a night with no row, or to replace a time already saved. I type the times in the 12-hour form (hour, minute, am/pm), and the server works out the dates from them. Every time saved this way is labeled "entered later", including replacements (the original tapped value is not kept). A typed sleep can be at most 12 hours, with no minimum. Older nights cannot be edited. The screen says which time is missing, and shows that nothing needs fixing when nothing does. |
 | History view | Each night shows bedtime and wake time. Missing times show as "missed" and are never invented. Entered-later times show a visible label. |
 | Weekly trend | Average bedtime this week compared with last week. Entered-later times are included, with their label shown. |
 | Target bedtime | I set a goal bedtime and step size (for example, 15 minutes earlier) and the app shows the next small step. |
@@ -99,7 +99,7 @@ Decided: plain JavaScript first, with TypeScript later once the fundamentals fee
 5. It checks the rules in section 8, then saves the times with the label "entered later" (creating the row if the night has none).
 6. It responds, and the screen shows the night as fixed.
 
-"Yesterday" means the night before the current night date, not the calendar day before today. At 3 am the current night still belongs to the previous calendar day.
+“Yesterday” means the night dated one calendar day before today’s date. At 7 am on Nov 16, it is the night of Nov 15, the night that just ended. The noon cutoff still decides which night a tap belongs to and where the resolver starts its search, but it does not decide which night late entry covers. Before noon, yesterday’s night is also the night the taps still use, so a typed time can replace a tapped one and is labeled “entered later”.
 
 **Night assignment rule:** a fixed noon cutoff. A "phone down" tap before noon belongs to the previous night, and a tap after noon belongs to tonight. This holds for my usual latest bedtime of about 5:20 am and for 1 pm wake-ups. The assigned night is saved on the log when it is created, so later changes never re-sort past data. Backup: if a night already has no wake time and I tap "phone down" again, the app asks whether I meant a new night instead of guessing.
 
@@ -152,7 +152,7 @@ Decided: plain JavaScript first, with TypeScript later once the fundamentals fee
 | 7 | 12-hour cap on typed sleep | A result of 14 hours is refused. A short night (such as 4 hours) is accepted |
 | 8 | 12-hour clock conversion | 12 am gives 0, 12 pm gives 12, 5 am gives 5, 5 pm gives 17 |
 
-**Edge cases:** double-tap, missing wake time, 5:20 am bedtime, 1 pm wake-up, a first-ever log with no history, a forgot-both night (no row), replacing a tapped time, a typed wake time that matches the bedtime's clock reading, and a late entry at 3 am (when the current night still belongs to the previous calendar day), and typed times of 12 am and 12 pm.
+**Edge cases:** double-tap, missing wake time, 5:20 am bedtime, 1 pm wake-up, a first-ever log with no history, a forgot-both night (no row), replacing a tapped time, a typed wake time that matches the bedtime's clock reading, and a late entry before noon (when yesterday's night is also the night the taps still use), and typed times of 12 am and 12 pm.
 
 **Parked for later:** timezones when traveling.
 
