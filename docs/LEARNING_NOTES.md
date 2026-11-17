@@ -430,3 +430,105 @@ function isLate(deadline, arrival, deadlineCounts) {
 **Current ability:** understanding. I ran `<` for both callers myself and saw the 0-hour result, then wrote the flag version.
 
 **Next practice (optional):** write a small function with a boolean input from scratch, then predict four calls, including the exact-equal one, with both flag values.
+
+---
+
+## 16. Reading a query result: `rows`, `rows[0]`, `null` vs `undefined`
+
+**Purpose:** read the right thing from a result, and never crash on an empty one.
+
+**Mental model:** `rows` is a shelf, and each box on it is one row. `rows.length` asks about the shelf. `rows[0]` is the first box, and a column name asks about one box.
+
+**Reusable structure (made-up `workouts` table):**
+
+````js
+const found = await pool.query("SELECT id, started_at, finished_at FROM workouts WHERE owner_id = $1 AND day = $2", [5, "2026-11-15"]);
+
+let status;
+if (found.rows.length === 0) {
+    status = "nothing_logged";
+} else if (found.rows[0].started_at === null) {
+    status = "missing_start";
+} else if (found.rows[0].finished_at === null) {
+    status = "missing_end";
+} else {
+    status = "complete";
+}
+````
+
+- `rows.length` first: on an empty result, `rows[0]` is `undefined`, and reading `.started_at` from it throws (a 500).
+- `null` means the row exists and the column is empty. `undefined` means nothing is at that position, or the column was not selected.
+- `rows.started_at` (no `[0]`) quietly gives `undefined`.
+- `rowCount` is a number. `rows` holds the data.
+- Declare `let status;` outside the chain and assign inside it with no `let`.
+
+**Common mistakes:**
+- Sending the whole result object (`rows: found`) instead of `found.rows`.
+- Checking a column that was not in the `SELECT`.
+- Guessing `null` for `rows[0]` on an empty result.
+
+**Current ability:** understanding. I explained the chain skipping later branches. I still said `null` for the empty case at first.
+
+**Next practice (optional):** given three made-up results (empty, one row with a NULL, one full row), say which branch runs and what `rows[0]` is in each.
+
+---
+
+## 17. A new route: folder is URL, and importing from another file
+
+**Purpose:** add an endpoint without touching a working one.
+
+**Mental model:** in the App Router the folder path is the URL, and only a file named `route.js` answers requests. Each exported function name (`GET`, `POST`) is one method.
+
+**Reusable structure (made-up):**
+
+````js
+// app/api/workouts-fix/route.js  ->  /api/workouts-fix
+import { formatDay } from "@/lib/dates";    // named export: braces, exact name
+import pool from "@/lib/db";                // default export: no braces
+
+export async function GET() {
+    const dayText = formatDay(new Date());  // the clock is passed in
+    return Response.json({ day: dayText });
+}
+````
+
+- A second file in the same folder does not become a route. A new URL needs a sibling folder.
+- A function is private to its file until it has `export` in front of it.
+- Relative paths count folders upward from the importing file. `@/` means the project root when `jsconfig.json` says so.
+- A route with no body needs no `request` parameter. Visiting the URL in the browser sends a GET.
+- Test the chain in small steps: helper only, then add the query.
+
+**Current ability:** understanding. I created the folder and file, exported the function, and saw the JSON in the browser.
+
+**Next practice (optional):** add a second small route with its own folder, then predict what the URL is before visiting it.
+
+---
+
+## 18. Debugging a 500: read the terminal, then check what changed
+
+**Purpose:** find the real cause without guessing.
+
+**Mental model:** the browser only says "500, something failed". The reason is written in the `npm run dev` terminal. A route that worked before and fails after one new thing was added points at that new thing.
+
+**Pattern:**
+1. Read the terminal text right after the failing request.
+2. List what changed since it last worked (here: a database call).
+3. Check the cheapest cause first: is the database container running (`docker ps`)? A stopped container gives a connection error, not a code error.
+4. Then check names (column, table) and `.env` values.
+
+**Made-up example:** a route that returned JSON now returns 500 after adding a SELECT. The terminal says the connection was refused, so the container was stopped, not the SQL.
+
+**Common mistakes:**
+- Suspecting the code before reading the terminal.
+- Running `docker run` again instead of `docker start`.
+
+**Current ability:** recognition. I found and fixed the stopped container myself after the hint to check it.
+
+**Next practice (optional):** break a working route on purpose (stop the container, then misspell a column) and say which terminal message belongs to which.
+
+---
+
+## Addenda to existing entries
+
+- **Entry 10 (pure functions):** a function that takes the current moment as an input (`describeYesterday(now)`) can be tested with fixed dates (Nov 1, Jan 1). One that calls `new Date()` inside can't be tested without waiting. The route passes the real clock in.
+- **Entry 11 (time):** `console.log(date)` prints UTC (`Z`). `.toString()` prints local time. Build `YYYY-MM-DD` text from the local parts (`getFullYear`, `getMonth() + 1`, `getDate()`) and not from `toISOString()`, which would give the wrong day at 7 am in GMT+8.
