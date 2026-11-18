@@ -22,3 +22,13 @@ export async function GET() {
 
     return Response.json({day: yesterday, dayStatus: status});
 }
+
+export async function POST(request) {
+     const body = await request.json();
+
+     if (body.bedtime === undefined && body.wake_time === undefined) {
+        return Response.json({error: "both bedtime and waketime are missing"}, {status: 400});
+     }
+
+     return Response.json("ok");
+}
