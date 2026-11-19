@@ -30,5 +30,17 @@ export async function POST(request) {
         return Response.json({error: "both bedtime and waketime are missing"}, {status: 400});
      }
 
+     if (body.bedtime !== undefined) {
+        if (body.bedtime.hour === undefined || body.bedtime.minute === undefined || body.bedtime.period === undefined) {
+            return Response.json({error: "bedtime needs hour, minute, and period"}, {status: 400});
+        }
+     }
+
+     if (body.wake_time !== undefined) {
+        if (body.wake_time.hour === undefined || body.wake_time.minute === undefined || body.wake_time.period === undefined) {
+            return Response.json({error: "wake_time needs hour, minute, and period"}, {status: 400});
+        }
+     }
+
      return Response.json("ok");
 }
