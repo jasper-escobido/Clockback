@@ -23,6 +23,27 @@ export async function GET() {
     return Response.json({day: yesterday, dayStatus: status});
 }
 
+function validateTime (time, label) {
+        
+            if (time.hour === undefined || time.minute === undefined || time.period === undefined) {
+                return label + " needs hour, minute, and period";
+            }
+
+            if (!Number.isInteger(time.hour) || time.hour < 1 || time.hour > 12) {
+                return label + " hours must be a whole number from 1 to 12";
+            }
+
+            if (!Number.isInteger(time.minute) || time.minute < 0 || time.minute > 59) {
+                return label + " minutes must be a whole number from 0 to 59";
+            }
+
+            if (time.period !== "am" && time.period !== "pm") {
+                return  label + " period must be am or pm";
+            }
+
+            return null;
+}
+
 export async function POST(request) {
      const body = await request.json();
 
@@ -31,15 +52,18 @@ export async function POST(request) {
      }
 
      if (body.bedtime !== undefined) {
-        if (body.bedtime.hour === undefined || body.bedtime.minute === undefined || body.bedtime.period === undefined) {
-            return Response.json({error: "bedtime needs hour, minute, and period"}, {status: 400});
+        const problem = validateTime(body.bedtime, "bedtime");
+        if (problem !== null) {
+            return Response.json({error: problem}, {status: 400});
         }
+
      }
 
      if (body.wake_time !== undefined) {
-        if (body.wake_time.hour === undefined || body.wake_time.minute === undefined || body.wake_time.period === undefined) {
-            return Response.json({error: "wake_time needs hour, minute, and period"}, {status: 400});
-        }
+       const problem = validateTime(body.wake_time, "wake_time");
+       if (problem !== null) {
+        return Response.json({error: problem}, {status: 400});
+       }
      }
 
      return Response.json("ok");
