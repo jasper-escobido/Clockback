@@ -526,9 +526,72 @@ export async function GET() {
 
 **Next practice (optional):** break a working route on purpose (stop the container, then misspell a column) and say which terminal message belongs to which.
 
+## 19. Validating a request body on the server
+
+**Purpose:** a request can be sent by hand with anything in it, so the server checks every value it uses before acting on it. A bad request is refused with a 400 and nothing else runs.
+
+**Mental model:** four kinds of check, in this order. (1) Shape: does the key exist? (2) Type: is it the right kind of value? (3) Range: is it inside the allowed numbers? (4) Allowlist: is it exactly one of the allowed words? Existence comes first, because reading `.hour` from `undefined` throws and the user would get a 500 for what is their request's fault.
+
+**Reusable structure (made-up):**
+
+````js
+function problemWith(visit, label) {          // returns a message, or null when fine
+    if (visit.floor === undefined || visit.kind === undefined) {
+        return label + " needs floor and kind";
+    }
+    if (!Number.isInteger(visit.floor) || visit.floor < 1 || visit.floor > 40) {
+        return label + " floor must be a whole number from 1 to 40";
+    }
+    if (visit.kind !== "guest" && visit.kind !== "staff") {
+        return label + " kind must be guest or staff";
+    }
+    return null;
+}
+
+export async function POST(request) {
+    const body = await request.json();
+    if (body.arrival === undefined && body.departure === undefined) {
+        return Response.json({ error: "send arrival or departure" }, { status: 400 });
+    }
+    if (body.arrival !== undefined) {
+        const problem = problemWith(body.arrival, "arrival");
+        if (problem !== null) {
+            return Response.json({ error: problem }, { status: 400 });
+        }
+    }
+    // ...the same for departure, then the real work
+}
+````
+
+- A body key is not a database column, even when the names match. Nesting (`arrival: { floor, kind }`) keeps one value's parts together.
+- Keep out of the body anything the server can work out, or can't trust from the browser (the user id, a date that must be "yesterday").
+- "Both missing" needs a full comparison on each side: `a === undefined && b === undefined`. Writing `a && b === undefined` attaches the comparison only to `b`, and `{}` slips through.
+- An allowlist joins its `!==` comparisons with `&&`. With `||` the condition is always true, so everything is refused.
+- `=== undefined` is safer than `!x` for numbers, because `!0` is true and a minute of `0` would be refused.
+- `Number.isInteger` refuses `"7"` and `7.5`, which a plain range check lets through (`"7" < 1` is false).
+- The helper returns a message or `null`, and the caller turns a message into a 400. A helper's `return` ends only the helper. A helper with no `return null` gives back `undefined`, and `undefined !== null` is true, so every valid request would be refused.
+- A `const` made inside an `if` block exists only in that block, so two `problem` variables in two blocks don't clash.
+- Status codes: 400 when the request alone shows the problem, 409 when it clashes with stored data, 500 when the server fails. A deliberate refusal is a returned 400, not a thrown error.
+- Route files may only export the HTTP method functions, so a helper in the same file stays private.
+
+**Common mistakes:**
+- Reading a nested key before checking its parent exists.
+- Copying a range's lower bound from another field (hour starts at 1, minute at 0).
+- A test body where a different check refuses first, so the new check is never seen working.
+- Letting the editor's autocomplete add an unrelated import at the top of the file.
+
+**Current ability:** understanding. I wrote the checks myself after hints. The helper and the window start were adapted from made-up examples.
+
+**Next practice (optional):** predict what `{ bedtime: null }` does to the current route, then test it and read the terminal.
+
+---
+
 ---
 
 ## Addenda to existing entries
 
 - **Entry 10 (pure functions):** a function that takes the current moment as an input (`describeYesterday(now)`) can be tested with fixed dates (Nov 1, Jan 1). One that calls `new Date()` inside can't be tested without waiting. The route passes the real clock in.
 - **Entry 11 (time):** `console.log(date)` prints UTC (`Z`). `.toString()` prints local time. Build `YYYY-MM-DD` text from the local parts (`getFullYear`, `getMonth() + 1`, `getDate()`) and not from `toISOString()`, which would give the wrong day at 7 am in GMT+8.
+- **Entry 10 (pure functions, validation):** the route validates first, then calls the pure functions. `to24Hour` assumes an hour from 1 to 12 and silently returns a wrong answer otherwise (13 pm gives 25), so nothing may reach it unchecked. Details in entry 19.
+- **Entry 12 (dates):** `setHours(12)` changes only the hour, so the minutes and seconds stay whatever the copy had (12:47:14). `setHours(12, 0, 0, 0)` gives exactly noon. Read the clock once per request (`const now = new Date()`) and reuse it, so two "now" values can't disagree near midnight. Compare dates with `<` and `>`. A typed time can be refused as "in the future" by checking `result.wake > now`, and only the wake needs it because it is always after the bedtime.
+- **Entry 13 (returning an object):** return real `Date` objects, and call `.toString()` only where a person reads them. A string can't be saved to the database or used in math. `console.log` of an object prints dates in UTC, so add 8 hours (GMT+8) in your head. Check `result.ok` before reading keys that a refused result doesn't have.

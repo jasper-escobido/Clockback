@@ -1,4 +1,4 @@
-import { describeYesterday } from "../../../lib/nightTimes";
+import { describeYesterday, to24Hour, resolveNight } from "../../../lib/nightTimes";
 import pool from "../../../lib/db";
 
 export async function GET() {
@@ -64,6 +64,27 @@ export async function POST(request) {
        if (problem !== null) {
         return Response.json({error: problem}, {status: 400});
        }
+     }
+
+     const now = new Date();
+     const windowStart = new Date(now);
+     windowStart.setDate(windowStart.getDate() - 1);
+     windowStart.setHours(12, 0, 0, 0);
+
+     if (body.bedtime !== undefined && body.wake_time !== undefined) {
+        const bedTimeHour = to24Hour(body.bedtime.hour, body.bedtime.period);
+        const wakeTimeHour = to24Hour(body.wake_time.hour, body.wake_time.period);
+        const result = resolveNight(windowStart, bedTimeHour, body.bedtime.minute, wakeTimeHour, body.wake_time.minute);
+
+        if (result.ok === false) {
+            return Response.json({error: "the hours are longer than the limit"}, {status: 400});
+        }
+
+        if (result.wake > now) {
+            return Response.json({error: "waketime is in the future"}, {status: 400});
+        }
+
+        console.log(result);
      }
 
      return Response.json("ok");
