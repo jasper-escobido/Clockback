@@ -1,4 +1,4 @@
-import { describeYesterday, to24Hour, resolveNight } from "../../../lib/nightTimes";
+import { describeYesterday, to24Hour, resolveNight, resolveBedtime } from "../../../lib/nightTimes";
 import pool from "../../../lib/db";
 
 export async function GET() {
@@ -70,6 +70,8 @@ export async function POST(request) {
      const windowStart = new Date(now);
      windowStart.setDate(windowStart.getDate() - 1);
      windowStart.setHours(12, 0, 0, 0);
+     const nightDate = describeYesterday(now);
+
 
      if (body.bedtime !== undefined && body.wake_time !== undefined) {
         const bedTimeHour = to24Hour(body.bedtime.hour, body.bedtime.period);
@@ -84,7 +86,44 @@ export async function POST(request) {
             return Response.json({error: "waketime is in the future"}, {status: 400});
         }
 
-        console.log(result);
+        const dataFound = await pool.query (
+            "SELECT id, bedtime, wake_time FROM sleep_logs where user_id = $1 AND night_date = $2", 
+            [1, nightDate]
+        );
+
+        if (dataFound.rows.length === 0) {
+            await pool.query (
+                "INSERT INTO sleep_logs (user_id, night_date, bedtime, wake_time, bedtime_source, wake_time_source) VALUES ($1, $2, $3, $4, 'entered later', 'entered later')",
+                [1, nightDate, result.bedtime, result.wake]
+            );
+        } else {
+            await pool.query (
+                "UPDATE sleep_logs SET bedtime = $1, wake_time = $2, bedtime_source = 'entered later', wake_time_source = 'entered later' WHERE id = $3",
+                [result.bedtime, result.wake, dataFound.rows[0].id]
+            );
+        }
+
+     } else if (body.bedtime !== undefined) {
+        const bedTimeHour = to24Hour(body.bedtime.hour, body.bedtime.period);
+        const bedTimeMoment = resolveBedtime(windowStart, bedTimeHour, body.bedtime.minute);
+
+        if (bedTimeMoment > now) {
+            return Response.json({error: "bedtime is in the future"}, {status: 400});
+        }
+
+          const dataFound = await pool.query (
+            "SELECT id, bedtime, wake_time FROM sleep_logs where user_id = $1 AND night_date = $2", 
+            [1, nightDate]
+        );
+
+
+        if (dataFound.rows.length === 0) {
+            await pool.query(
+                "INSERT INTO sleep_logs (user_id, night_date, bedtime, bedtime_source) VALUES ($1, $2, $3, 'entered later')",
+                [1, nightDate, bedTimeMoment]
+            );
+        }
+
      }
 
      return Response.json("ok");

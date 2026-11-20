@@ -595,3 +595,22 @@ export async function POST(request) {
 - **Entry 10 (pure functions, validation):** the route validates first, then calls the pure functions. `to24Hour` assumes an hour from 1 to 12 and silently returns a wrong answer otherwise (13 pm gives 25), so nothing may reach it unchecked. Details in entry 19.
 - **Entry 12 (dates):** `setHours(12)` changes only the hour, so the minutes and seconds stay whatever the copy had (12:47:14). `setHours(12, 0, 0, 0)` gives exactly noon. Read the clock once per request (`const now = new Date()`) and reuse it, so two "now" values can't disagree near midnight. Compare dates with `<` and `>`. A typed time can be refused as "in the future" by checking `result.wake > now`, and only the wake needs it because it is always after the bedtime.
 - **Entry 13 (returning an object):** return real `Date` objects, and call `.toString()` only where a person reads them. A string can't be saved to the database or used in math. `console.log` of an object prints dates in UTC, so add 8 hours (GMT+8) in your head. Check `result.ok` before reading keys that a refused result doesn't have.
+
+## Saving after a SELECT: INSERT or UPDATE
+
+- Ask the database first (SELECT), then decide: `rows.length === 0` means no row yet (INSERT), otherwise UPDATE by the row's `id` from `rows[0].id`. The id comes from the query result, never from the request body.
+- `body` is what the browser sent. `result.rows` is what the database returned. They are different objects: `body.rows` is `undefined`, and `undefined.length` throws a TypeError (a 500).
+- A column left out of an INSERT is stored as NULL. Leaving out a time and its label together keeps "both filled or both empty" true.
+- A wrong column name in a valid query does not fail. The value saves silently into the wrong place. Check the columns in `psql` after a test, not just the status code.
+- When the SELECT finds a row, the INSERT never runs, so the unique rule is never reached. The unique rule is a backstop. The `if` is the first line of defense.
+- A 200 does not prove something was saved. A branch that does nothing can still return "ok".
+
+## Testing a time rule without waiting for the right time of day
+
+- A rule that depends on the clock (a future-time check) can be tested by temporarily setting `now` to a fixed `Date`, for example `new Date(2026, 10, 20, 8, 0, 0, 0)`. Anything derived from `now` (`windowStart`, `nightDate`) stays consistent. Put `new Date()` back afterwards.
+- Pick test bodies so the intended rule is the one that refuses.
+
+## Exported helpers and the temporary test lines
+
+- A file that is imported runs all its top-level code. Test `console.log` lines left at the bottom of `lib/nightTimes.js` would print on every import. Delete them after testing.
+- `node file.js` printing `MODULE_TYPELESS_PACKAGE_JSON` is a warning only, because `package.json` has no `"type": "module"`. Next.js is unaffected.
