@@ -1,4 +1,4 @@
-import { describeYesterday, to24Hour, resolveNight, resolveBedtime } from "../../../lib/nightTimes";
+import { describeYesterday, to24Hour, resolveNight, resolveBedtime, isSleepTooLong } from "../../../lib/nightTimes";
 import pool from "../../../lib/db";
 
 export async function GET() {
@@ -122,6 +122,24 @@ export async function POST(request) {
                 "INSERT INTO sleep_logs (user_id, night_date, bedtime, bedtime_source) VALUES ($1, $2, $3, 'entered later')",
                 [1, nightDate, bedTimeMoment]
             );
+        } else {
+            const savedWake = dataFound.rows[0].wake_time;
+
+            if  ( savedWake !== null) {
+                if (bedTimeMoment >= savedWake ) {
+                    return Response.json({error: "bedtime must be before saved wake_time"}, {status: 400});
+                }
+
+                if (isSleepTooLong(bedTimeMoment, savedWake)) {
+                    return Response.json({error: "hours is longer than the limit"}, {status: 400});
+                }
+            }
+
+            await pool.query (
+                "UPDATE sleep_logs SET bedtime = $1, bedtime_source = 'entered later' WHERE id = $2", 
+                [bedTimeMoment, dataFound.rows[0].id]
+            );
+
         }
 
      }
