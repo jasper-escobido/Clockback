@@ -1,4 +1,4 @@
-import { describeYesterday, to24Hour, resolveNight, resolveBedtime, isSleepTooLong } from "../../../lib/nightTimes";
+import { describeYesterday, to24Hour, resolveNight, resolveBedtime, isSleepTooLong, resolveWake } from "../../../lib/nightTimes";
 import pool from "../../../lib/db";
 
 export async function GET() {
@@ -71,6 +71,10 @@ export async function POST(request) {
      windowStart.setDate(windowStart.getDate() - 1);
      windowStart.setHours(12, 0, 0, 0);
      const nightDate = describeYesterday(now);
+     const dataFound = await pool.query (
+            "SELECT id, bedtime, wake_time FROM sleep_logs where user_id = $1 AND night_date = $2", 
+            [1, nightDate]
+        );
 
 
      if (body.bedtime !== undefined && body.wake_time !== undefined) {
@@ -85,11 +89,6 @@ export async function POST(request) {
         if (result.wake > now) {
             return Response.json({error: "waketime is in the future"}, {status: 400});
         }
-
-        const dataFound = await pool.query (
-            "SELECT id, bedtime, wake_time FROM sleep_logs where user_id = $1 AND night_date = $2", 
-            [1, nightDate]
-        );
 
         if (dataFound.rows.length === 0) {
             await pool.query (
@@ -110,12 +109,6 @@ export async function POST(request) {
         if (bedTimeMoment > now) {
             return Response.json({error: "bedtime is in the future"}, {status: 400});
         }
-
-          const dataFound = await pool.query (
-            "SELECT id, bedtime, wake_time FROM sleep_logs where user_id = $1 AND night_date = $2", 
-            [1, nightDate]
-        );
-
 
         if (dataFound.rows.length === 0) {
             await pool.query(
@@ -142,6 +135,28 @@ export async function POST(request) {
 
         }
 
+     } else if (body.wake_time !== undefined) {
+          
+        if (dataFound.rows.length === 0 || dataFound.rows[0].bedtime === null) {
+            return Response.json({error: "a bedtime is needed first"}, {status: 400});
+        }
+
+        const savedBedTime = dataFound.rows[0].bedtime; 
+        const wakeTimeHour = to24Hour(body.wake_time.hour, body.wake_time.period);
+        const wake = resolveWake (savedBedTime, wakeTimeHour, body.wake_time.minute);
+
+        if (wake > now) {
+            return Response.json({error: "wake_time is in the future"}, {status: 400});
+        }
+
+        if (isSleepTooLong(savedBedTime, wake)) {
+            return Response.json({error: "hours is longer than the limit"}, {status: 400});
+        }
+        
+        await pool.query (
+            "UPDATE sleep_logs SET wake_time = $1, wake_time_source = 'entered later' WHERE id = $2",
+            [wake, dataFound.rows[0].id]
+        );
      }
 
      return Response.json("ok");

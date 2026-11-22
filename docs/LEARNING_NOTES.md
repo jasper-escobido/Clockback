@@ -614,3 +614,33 @@ export async function POST(request) {
 
 - A file that is imported runs all its top-level code. Test `console.log` lines left at the bottom of `lib/nightTimes.js` would print on every import. Delete them after testing.
 - `node file.js` printing `MODULE_TYPELESS_PACKAGE_JSON` is a warning only, because `package.json` has no `"type": "module"`. Next.js is unaffected.
+
+## One shared query vs one per branch
+
+- A query that several branches need can run once at the top of the function and each branch can read its result. One place to change (for example the user id once login exists), less code, and the branches cannot drift apart.
+- Trade-off: it also runs for requests that are then refused, and the query sits away from the code that uses it. Fine at small scale.
+- If an inner `const` has the same name as an outer one, JavaScript does not complain. The inner one hides the outer one inside its braces and the work is done twice. After moving a query up, check each branch for a leftover copy.
+
+## Checking order before checking length
+
+- `isSleepTooLong(bedtime, wake)` only measures the gap. If the wake is before the bedtime the gap is negative, and a negative number is never over 12, so the length check would say "fine". Check the order first.
+- `>=` refuses an equal moment as well, which is right when one time must be strictly after the other.
+
+## `||` and the empty list
+
+- `rows.length === 0 || rows[0].x === null`: if the list is empty the first half is already true, so the second half never runs and `rows[0]` is never read. Swap the halves and an empty result crashes with a TypeError.
+- `rows` is the list, `rows[0]` is the first row. `rows[0].length` is not the list's length.
+
+## Which saved time to compare against
+
+- When the user types one time, the saved time you compare it with is its partner. A typed bedtime is compared with the saved wake, and a typed wake with the saved bedtime. Name variables so they say what they hold (`savedWake`, `savedBedTime`).
+
+## Braces and `else if`
+
+- `else if (condition)` with no braces controls only the next single statement. If the final `return` follows directly, it becomes the body of the `else if`, and the function can end without returning anything (a 500).
+
+## Testing against a moving date
+
+- A route that targets "yesterday" changes its target every midnight. Before judging a test, `SELECT` by `night_date` and check which row the request really hit.
+- If a request returns 200 and the old row looks unchanged, check whether a new row was inserted for the new night.
+- `psql` shows `timestamptz` in UTC (`+00`). 12 pm in GMT+8 is `04:00+00`, and 11 pm is `15:00+00`. `\pset pager off` turns off the pager that stops long output.
