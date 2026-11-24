@@ -31,7 +31,7 @@ export async function POST(request) {
             throw error;
         }
     }
-
+    
     if (body.action === "wake") {
         const tapWakeTime = new Date();
         let updatedCount = 0;
