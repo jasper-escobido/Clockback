@@ -15,6 +15,20 @@ export default function LateEntry() {
         .catch(() => setError("Couldn't load your data"));
         }, []); 
 
+        function handleSubmit() {
+            fetch("/api/late_entry", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    bedtime: {hour: Number(bedtime.hour), minute: Number(bedtime.minute), period: bedtime.period},
+                }),
+            })
+            .then((res) => {
+                console.log(res.status)
+                return res.json();
+            })
+            .then((json) => console.log(json));
+        }
 
     if (error !== null) return <p>{error}</p>;
     if (data === null) return <p>Loading...</p>;
@@ -47,6 +61,7 @@ export default function LateEntry() {
             </select>
 
             <p>{JSON.stringify(bedtime)}</p>
+            <button type = "button" onClick = {handleSubmit}>Save</button>
         </div>
     )
 
