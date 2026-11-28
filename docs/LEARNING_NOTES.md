@@ -587,6 +587,70 @@ export async function POST(request) {
 ---
 
 ---
+## 20. `useState` and `useEffect`: fetching when a component appears
+
+**Purpose:** show server data on a page without a tap.
+
+**Mental model:** `useState` is memory that survives re-renders. `useEffect` is an errand that runs after the page is drawn. The errand ends by calling a setter, which redraws.
+
+**Reusable structure** (made-up `pets` example):
+
+    const [pets, setPets] = useState(null);
+    const [error, setError] = useState(null);
+    useEffect(() => {
+      fetch("/api/pets")
+        .then((res) => {
+          if (!res.ok) throw new Error("Server said " + res.status);
+          return res.json();
+        })
+        .then((json) => setPets(json))
+        .catch(() => setError("Couldn't load pets."));
+    }, []);
+    if (error !== null) return <p>{error}</p>;
+    if (pets === null) return <p>Loading...</p>;
+
+**Rules:** `[]` runs once after the first render. Check `error` before the `null` check, or a failure shows "Loading..." forever. State resets on a reload, so anything that must survive goes to the database. Don't `fetch` in the component body (it loops).
+
+**Common mistakes:** thinking a 404 or 500 makes `fetch` reject (it doesn't, so check `res.ok`); calling a hook after an early `return`; hooks in a file without `"use client"`.
+
+## 21. Controlled inputs, object state, and reusable components
+
+**Purpose:** collect typed values and reuse one set of fields.
+
+**Mental model:** React's state is the source of truth for what an input shows. `value` reads it and `onChange` updates it.
+
+**Reusable structure** (made-up `address` example):
+
+    <input value={home.city}
+      onChange={(e) => setHome({ ...home, city: e.target.value })} />
+
+    function AddressFields(props) { /* reads props.value, calls props.onChange({...props.value, city: ...}) */ }
+    <AddressFields value={home} onChange={setHome} idPrefix="home" />
+
+**Rules:** a setter replaces the value, it doesn't merge, so spread the old object (`...`) and overwrite one field. Never change state directly. `e.target.value` is always a string, so use `Number(...)` before sending numbers. State stays in the parent, and the child gets `value` and a setter as props. A component name starts with a capital and is defined outside its parent. Ids must be unique on the page: build them from a prop (`props.idPrefix + "-city"`) and match `htmlFor`.
+
+**Common mistakes:** calling a parent's setter from inside the child; `onChange` replacing an object with a string; `value` or `onChange` on `<option>` instead of `<select>`; `for` instead of `htmlFor`.
+
+## 22. Sending a form and handling the answer
+
+**Purpose:** send typed data and show the result.
+
+**Reusable structure** (made-up `notes` example):
+
+    function saveNote(body) {
+      setFormError(null);
+      fetch("/api/notes", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) })
+        .then((res) => res.json().then((json) => {
+          if (!res.ok) setFormError(json.error);
+          else loadNotes();           // refetch so the server decides what shows
+        }))
+        .catch(() => setFormError("Couldn't reach the server."));
+    }
+    <button type="button" onClick={() => saveNote({ title: title })}>Save</button>
+
+**Rules:** nest `res.json().then(...)` so `res` and `json` are both in reach. Clear the old message first. `onClick={fn}` passes the function, but `onClick={fn(x)}` calls it while drawing (a possible request loop), so wrap it: `() => fn(x)`. After a save, refetch. The server's answer is the truth. The `.catch` covers a stopped server or a non-JSON 500. To test the catch path, pass validation first, then stop the database.
+
+**Common mistakes:** body missing its outer key (`{ bedtime: {...} }`); strings where the route needs numbers; a leftover `.then` after the nested one receiving `undefined`.
 
 ## Addenda to existing entries
 
@@ -644,3 +708,10 @@ export async function POST(request) {
 - A route that targets "yesterday" changes its target every midnight. Before judging a test, `SELECT` by `night_date` and check which row the request really hit.
 - If a request returns 200 and the old row looks unchanged, check whether a new row was inserted for the new night.
 - `psql` shows `timestamptz` in UTC (`+00`). 12 pm in GMT+8 is `04:00+00`, and 11 pm is `15:00+00`. `\pset pager off` turns off the pager that stops long output.
+
+## Strings shared between files, and imports
+
+- A string used by two files (a status name) is a contract kept only by typing it identically, including case and underscores. A mismatch doesn't error, it falls through to a fallback. Keep a fallback branch, and test each value against a real row.
+- `a === "x" || "y"` is wrong because `"y"` is always truthy. Write `a === "x" || a === "y"`.
+- An editor auto-import can shadow a built-in (`import Error from "next/error"` replaced `Error`). If a name behaves oddly, check the imports at the top.
+- JSX treats a stray `;` after an element as visible text.

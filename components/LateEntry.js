@@ -44,12 +44,12 @@ export default function LateEntry() {
     if (error !== null) return <p>{error}</p>;
     if (data === null) return <p>Loading...</p>;
    
-    if (data.dayStatus === "missing_Bedtime" || data.dayStatus === "log_not_found") return (
+    if (data.dayStatus === "missing_bedtime" || data.dayStatus === "log_not_found") return (
         <div>
-             <p>{data.day} bedtime is missing</p>
+             <p> What time did you go to bed at {data.day}?</p>
                 <TimeInput value={bedtime} onChange={setBedTime} idPrefix="bedtime"/>
       
-            <p>{JSON.stringify(bedtime)}</p>
+           
             <button type = "button" onClick ={() => handleSubmit({bedtime: {hour: Number(bedtime.hour), minute: Number(bedtime.minute), period: bedtime.period}})}>Save</button>
             {formError !== null && <p>{formError}</p>}
         </div>
@@ -57,15 +57,15 @@ export default function LateEntry() {
    
     if (data.dayStatus === "missing_waketime") return (
     <div>
-        <p>{data.day} waketime is missing</p>
+        <p>WHat time did you wake up at {data.day}?</p>
               <TimeInput value={waketime} onChange={setWakeTime} idPrefix="waketime"/>
       
-            <p>{JSON.stringify(waketime)}</p>
+          
             <button type = "button" onClick ={() => handleSubmit({wake_time: {hour: Number(waketime.hour), minute: Number(waketime.minute), period: waketime.period}})}>Save</button>
             {formError !== null && <p>{formError}</p>}
     </div>
     )
-    if (data.dayStatus === "complete") return <p>{data.day} is logged</p>;
+    if (data.dayStatus === "complete") return <p>All set. Nothing to add for {data.day}.</p>;
    
     return <p>The yesterday date is: {data.day} and status: {data.dayStatus}</p>
     
