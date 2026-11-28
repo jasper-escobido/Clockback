@@ -1,4 +1,5 @@
 import pool from "../../../lib/db";
+import { describeYesterday } from "../../../lib/nightTimes";
 
 
 export async function POST(request) {
@@ -55,12 +56,12 @@ export async function POST(request) {
             try {
                 await pool.query(
                      "INSERT INTO sleep_logs (user_id, night_date, wake_time, wake_time_source) VALUES ($1, $2, $3, $4)",
-                    [1, nightDate, tapWakeTime, "tapped"]
+                    [1, describeYesterday(tapWakeTime), tapWakeTime, "tapped"]
                 );
 
             } catch (error) {
                  if (error.constraint === "sleep_logs_user_id_night_date_key"){
-                 return Response.json({ error: "wake already logged today" }, { status: 409 });
+                 return Response.json({ error: "wake already logged yesterday" }, { status: 409 });
                 }
                 throw error;
             }

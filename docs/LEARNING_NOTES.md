@@ -652,6 +652,38 @@ export async function POST(request) {
 
 **Common mistakes:** body missing its outer key (`{ bedtime: {...} }`); strings where the route needs numbers; a leftover `.then` after the nested one receiving `undefined`.
 
+## 23. Database rules: schema, migrations, and pair CHECKs
+
+**Purpose:** let the database refuse bad data itself, as the last backstop behind the server's checks.
+
+**Mental model:** the schema is the shape of the database right now. Migrations are the numbered, saved steps that build it. A CHECK states what a **good** row looks like, and Postgres refuses any row that doesn't match. A SELECT that hunts for bad rows describes the **opposite**.
+
+**Reusable structure** (made-up `parcels` table with a time-and-label pair):
+
+    -- the rule: ship_date and carrier are both empty or both filled
+    ALTER TABLE parcels
+    ADD CONSTRAINT parcels_ship_pair_check
+    CHECK ((ship_date IS NULL AND carrier IS NULL)
+        OR (ship_date IS NOT NULL AND carrier IS NOT NULL));
+
+    -- before running it, find rows that would break it (exactly one side filled)
+    SELECT id FROM parcels
+    WHERE (ship_date IS NOT NULL AND carrier IS NULL)
+       OR (ship_date IS NULL AND carrier IS NOT NULL);
+
+**Rules:**
+- In a CHECK, each line has the **same** emptiness on both columns. In the hunting SELECT, each line has **opposite** emptiness.
+- One constraint per pair, named `table_thing_check`, so the error says which rule refused.
+- Adding a CHECK tests every existing row, so run the SELECT first. `(0 rows)` means the migration is safe.
+- `AND` binds tighter than `OR`, so use parentheses around each group.
+- Several `ALTER TABLE` statements each need their own `ALTER TABLE` and a `;`. Or use one `ALTER TABLE` with parts separated by commas.
+- Prove a rule by breaking it on purpose. A column left out of an INSERT becomes `NULL`, which is how you build the mismatch. Check that the error names your constraint, and that no row slipped in.
+- Run a migration from the normal shell prompt, not inside `psql`, with `-v ON_ERROR_STOP=1`.
+
+**Common mistakes:** copying the example's column names unchanged; writing the broken shape inside a CHECK; testing with an INSERT that leaves out both halves (a healthy row, so it succeeds); a typo in a label, so a different constraint fires.
+
+**Current ability:** understanding. I wrote the SELECT and the migration after corrections. To rebuild from memory: a pair CHECK for a different made-up pair (for example `started_at` with `started_by`).
+
 ## Addenda to existing entries
 
 - **Entry 10 (pure functions):** a function that takes the current moment as an input (`describeYesterday(now)`) can be tested with fixed dates (Nov 1, Jan 1). One that calls `new Date()` inside can't be tested without waiting. The route passes the real clock in.
